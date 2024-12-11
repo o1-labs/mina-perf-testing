@@ -1,0 +1,16 @@
+# System
+.DS_Store
+
+# IntelliJ
+.idea
+*.iws
+*.iml
+*.ipr
+.fleet
+
+# Visual Studio Code
+.vscode
+.history
+
+# Dotenv environment variables file
+.env

@@ -1,0 +1,63 @@
+# Version is obsolete
+# version: "3.8"
+
+networks:
+  o1labs-fetcher:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    container_name: postgres
+    restart: always
+    command: "-c max_connections=10000 -c shared_buffers=2048MB"
+    networks:
+      - ${NETWORK_NAME}
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    shm_size: 1g
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+      - ./init-sql:/docker-entrypoint-initdb.d
+      - "/etc/localtime:/etc/localtime:ro"
+
+  log-fetcher:
+    depends_on:
+      - postgres
+    image: o1labs/mina:perf-testing-internal-trace-consumer
+    container_name: log-fetcher
+    restart: always
+    command: "fetcher -k /keys/fetcher_sk -o /output ${HOST_OVERRIDES} --db-uri 'postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}' discovery"
+    networks:
+      - ${NETWORK_NAME}
+    ports:
+      - "4000:4000"
+      - "11000-11700:11000-11700"
+    volumes:
+      - ./keys:/keys
+      - ./output:/output
+      - ./names-data:/names-data
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      INTERNAL_TRACE_CONSUMER_EXE: /internal_trace_consumer
+      HANDLE_STATUS_CHANGE: true
+      FETCH_INTERVAL_MS: 5000
+      ONLINE_URL: ${UPTIME_BACKEND_API_URL}
+
+  dashboard:
+    depends_on:
+      - log-fetcher
+    image: o1labs/mina:perf-testing-mvp-orchestrator-dashboard
+    container_name: dashboard
+    restart: always
+    networks:
+      - ${NETWORK_NAME}
+    ports:
+      - "4200:80"
+
+volumes:
+  postgres_data:

@@ -1,0 +1,15 @@
+{
+  "key": "2Dtcua6w9g8JZczc/D6laz6Yn1ZP7DVGCmHfFDxGupY=",
+  "slotDurationMs": 180000,
+  "genesisTimestamp": "2024-12-11T00:00:00Z",
+  "onlineURL": "http://uptime-backend-hetzner-itn-1.gcp.o1test.net/v1/online",
+  "fundDaemonPorts": ["65.21.162.134:32301"],
+  "logFile": "orchestrator.log",
+  "urlOverrides": [
+    "plain-{}-itn.hetzner-itn-1.gcp.o1test.net",
+    "whale-{}-itn.hetzner-itn-1.gcp.o1test.net",
+    "seed-{}-itn.hetzner-itn-1.gcp.o1test.net",
+    "coordinator-{}-itn.hetzner-itn-1.gcp.o1test.net"
+  ],
+  "minaExec": "/home/o1labs/result/bin/mina"
+}
