@@ -416,19 +416,18 @@ from
 
 create
 or replace view experiments as with txs_ as (
+  -- we're aiming to process transactions with memos of form {name}-{round}-{batch}-{ix}
+  --                                                                  -3       -2    -1
   select
-    split_part(memo, '-', -2) as exp,
+    regexp_replace(memo, '-\d+-\d+-\d+$', '') as exp,
     cast(
-      nullif(
-        regexp_replace(split_part(memo, '-', -1), '[^\d]', ''),
-        ''
-      ) as int
+      split_part(memo, '-', -3) as int
     ) as round,
     *
   from
     txs
   where
-    memo like '%-%' -- Only include rows where memo contains a dash
+    memo ~ '-\d+-\d+-\d+$'
 )
 select
   t.exp,
