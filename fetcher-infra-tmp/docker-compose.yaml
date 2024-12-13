@@ -28,7 +28,7 @@ services:
   log-fetcher:
     depends_on:
       - postgres
-    image: o1labs/mina:perf-testing-internal-trace-consumer
+    image: o1labs/mina-perf-testing:internal-trace-consumer
     container_name: log-fetcher
     restart: always
     command: "fetcher -k /keys/fetcher_sk -o /output ${HOST_OVERRIDES} --db-uri 'postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}' discovery"
@@ -51,13 +51,27 @@ services:
   dashboard:
     depends_on:
       - log-fetcher
-    image: o1labs/mina:perf-testing-mvp-orchestrator-dashboard
+    image: o1labs/mina-perf-testing:dashboard-mvp-orchestrator
     container_name: dashboard
     restart: always
     networks:
       - ${NETWORK_NAME}
     ports:
       - "4200:80"
+
+  in-memory-uptime-backend:
+    image: o1labs/mina-perf-testing:in-memory-uptime-backend
+    container_name: in-memory-uptime-backend
+    restart: always
+    networks:
+      - ${NETWORK_NAME}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./uptime-backend/config.json:/app/config.json
+    environment:
+      NETWORK: "testnet"
+      CONFIG_FILE: "/app/config.json"
 
 volumes:
   postgres_data:

@@ -32,8 +32,8 @@ test)
 docker-publish)
   DOCKER_IMAGE_TAG=in-memory-uptime-backend
   docker build -t ${DOCKER_IMAGE_TAG} .
-  docker tag ${DOCKER_IMAGE_TAG} o1labs/mina:${DOCKER_IMAGE_TAG}
-  docker push o1labs/mina:${DOCKER_IMAGE_TAG}
+  docker tag ${DOCKER_IMAGE_TAG} o1labs/mina-perf-testing:${DOCKER_IMAGE_TAG}
+  docker push o1labs/mina-perf-testing:${DOCKER_IMAGE_TAG}
   ;;
 "")
   build_c_reference_signer
