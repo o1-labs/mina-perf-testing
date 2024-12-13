@@ -8,6 +8,10 @@ The Mina network performance testing tools
 git submodule sync && git submodule update --recursive --init
 ```
 
+## Public docker images
+
+[https://hub.docker.com/r/o1labs/mina/tags](https://hub.docker.com/r/o1labs/mina/tags)
+
 ## Components
 
 ### Performance testing scenarios generator and orchestrator executables
@@ -60,8 +64,9 @@ docker push o1labs/mina:perf-testing-<ENV_NAME>-dashboard
 
 Where `<ENV_NAME>` is the environment name the dashboard was built for (considering the Docker image build arguments passed).  
 This is required because the dashboard building procedure results in 100% client-side application, which is not aware of the environment it is running in.
+Also please make sure that the `FETCHER_HOST` and `FETCHER_PORT` are publicly available (same reason as it was described above, the client-side application).
 
-### Uptime backend (In-memory)
+### In-memory uptime backend
 
 - [./uptime-backend](./uptime-backend)
 
@@ -94,7 +99,7 @@ Example configuration file:
 Example container start-up command:
 
 ```shell
-docker run -id -p 8080:8080 -v ./config.json:/app/config.json -e CONFIG_FILE="/app/config.json" -e NETWORK="testnet" o1labs/mina:uptime-backend
+docker run -id -p 8080:8080 -v ./config.json:/app/config.json -e CONFIG_FILE="/app/config.json" -e NETWORK="testnet" o1labs/mina:in-memory-uptime-backend
 ```
 
 Reported network participants then can be found at [http://localhost:8080/v1/online](http://localhost:8080/v1/online).
