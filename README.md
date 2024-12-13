@@ -67,7 +67,7 @@ docker push o1labs/mina-perf-testing:dashboard-<ENV_NAME>
 ```
 
 Where `<ENV_NAME>` is the environment name the dashboard was built for (considering the Docker image build arguments passed).  
-This is required because the dashboard building procedure results in 100% client-side application, which is not aware of the environment it is running in.
+This is required because the dashboard building procedure results in 100% client-side application, which is not aware of the environment it is running in.  
 Also please make sure that the `FETCHER_HOST` and `FETCHER_PORT` are publicly available (same reason as it was described above, the client-side application).
 
 ### In-memory uptime backend
