@@ -57,7 +57,11 @@ The dashboard for the target network monitoring and performance analysis.
 
 ```shell
 cd mina-frontend
-docker build --build-arg FETCHER_HOST="http://localhost" --build-arg FETCHER_PORT="4000" --build-arg APP_CONFIG="fetcher" -t mina-frontend-<ENV_NAME> .
+docker build \
+  --build-arg FETCHER_HOST="http://localhost" \
+  --build-arg FETCHER_PORT="4000" \
+  --build-arg APP_CONFIG="fetcher" \
+  -t mina-frontend-<ENV_NAME> .
 docker tag mina-frontend-<ENV_NAME> o1labs/mina-perf-testing:dashboard-<ENV_NAME>
 docker push o1labs/mina-perf-testing:dashboard-<ENV_NAME>
 ```
@@ -99,7 +103,13 @@ Example configuration file:
 Example container start-up command:
 
 ```shell
-docker run -id -p 8080:8080 -v ./config.json:/app/config.json -e CONFIG_FILE="/app/config.json" -e NETWORK="testnet" o1labs/mina-perf-testing:in-memory-uptime-backend
+docker run \
+  -id \
+  -p 8080:8080 \
+  -v ./config.json:/app/config.json \
+  -e CONFIG_FILE="/app/config.json" \
+  -e NETWORK="testnet" \
+  o1labs/mina-perf-testing:in-memory-uptime-backend
 ```
 
 Reported network participants then can be found at [http://localhost:8080/v1/online](http://localhost:8080/v1/online).
