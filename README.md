@@ -10,7 +10,7 @@ git submodule sync && git submodule update --recursive --init
 
 ## Public docker images
 
-[https://hub.docker.com/r/o1labs/mina/tags](https://hub.docker.com/r/o1labs/mina/tags)
+[https://hub.docker.com/r/o1labs/mina-perf-testing/tags](https://hub.docker.com/r/o1labs/mina-perf-testing/tags)
 
 ## Components
 
