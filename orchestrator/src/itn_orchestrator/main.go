@@ -285,7 +285,7 @@ func main() {
 			}
 			fundKeysBaseDir := extractBaseDir(fundParams.Prefix)
 			if folderExists(fundKeysBaseDir) {
-				fmt.Fprintf(os.Stderr, "\nError: Folder '%s' already exists.\nPlease re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value.\n", fundKeysBaseDir)
+				fmt.Fprintf(os.Stderr, "\nError: Directory '%s' already exists.\nPlease re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value.\n", fundKeysBaseDir)
 				os.Exit(1)
 			}
 		}
