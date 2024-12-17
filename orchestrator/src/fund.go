@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -78,11 +76,6 @@ func fundRunImpl(config Config, ctx context.Context, daemonPortIx int, params Fu
 	if params.PasswordEnv != "" {
 		password, _ = os.LookupEnv(params.PasswordEnv)
 	}
-	keysBaseDir := extractBaseDir(params.Prefix)
-	if folderExists(keysBaseDir) {
-		fmt.Fprintf(os.Stderr, "\nError: Folder '%s' already exists.\nPlease re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value.\n", keysBaseDir)
-		os.Exit(1)
-	}
 	return retryOnMultipleServers(config.FundDaemonPorts, daemonPortIx, "fund", config.Log, func(daemonPort string) error {
 		return fundImpl(config, ctx, daemonPort, params, amountPerKey, password)
 	})
@@ -145,24 +138,6 @@ func (FundAction) RunMany(config Config, actionIOs []ActionIO) error {
 		}
 	}
 	return nil
-}
-
-// Helper function to extract the first two levels of the path
-func extractBaseDir(prefix string) string {
-	parts := strings.Split(filepath.ToSlash(prefix), "/")
-	if len(parts) >= 3 {
-		return strings.Join(parts[:3], "/")
-	}
-	return prefix
-}
-
-// Helper function to check if a folder exists
-func folderExists(path string) bool {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return info.IsDir()
 }
 
 var _ BatchAction = FundAction{}
