@@ -4,6 +4,8 @@ user.bazelrc
 
 # make stuff
 result/
+generator
+orchestrator
 
 # Binaries for programs and plugins
 *.exe
