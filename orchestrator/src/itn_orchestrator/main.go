@@ -7,10 +7,7 @@ import (
 	"fmt"
 	"io"
 	"itn_json_types"
-	"itn_orchestrator"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -278,17 +275,6 @@ func main() {
 			os.Exit(6)
 			return
 		}
-		if cmd.Action == "fund-keys" {
-			var fundParams itn_orchestrator.FundParams
-			if err := json.Unmarshal(params, &fundParams); err != nil {
-				os.Exit(1)
-			}
-			fundKeysBaseDir := extractBaseDir(fundParams.Prefix)
-			if folderExists(fundKeysBaseDir) {
-				fmt.Fprintf(os.Stderr, "\nError: Directory '%s' already exists.\nPlease re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value.\n", fundKeysBaseDir)
-				os.Exit(1)
-			}
-		}
 		if prevAction != nil && prevAction.Name() != cmd.Action {
 			handlePrevAction()
 		}
@@ -300,6 +286,10 @@ func main() {
 		}
 		batchAction, isBatchAction := action.(lib.BatchAction)
 		if isBatchAction {
+			if err := batchAction.Validate(config, params); err != nil {
+				fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
+				os.Exit(1)
+			}
 			prevAction = batchAction
 			actionAccum = append(actionAccum, lib.ActionIO{
 				Params: params,
@@ -319,22 +309,4 @@ func main() {
 	if prevAction != nil {
 		handlePrevAction()
 	}
-}
-
-// Helper function to extract the first two levels of the path
-func extractBaseDir(prefix string) string {
-	parts := strings.Split(filepath.ToSlash(prefix), "/")
-	if len(parts) >= 3 {
-		return strings.Join(parts[:3], "/")
-	}
-	return prefix
-}
-
-// Helper function to check if a folder exists
-func folderExists(path string) bool {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return info.IsDir()
 }

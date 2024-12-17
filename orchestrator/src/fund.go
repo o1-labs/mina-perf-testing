@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -138,6 +140,36 @@ func (FundAction) RunMany(config Config, actionIOs []ActionIO) error {
 		}
 	}
 	return nil
+}
+
+func (FundAction) Validate(config Config, rawParams json.RawMessage) error {
+	var params FundParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return fmt.Errorf("failed to unmarshal fund-keys params: %v", err)
+	}
+	fundKeysBaseDir := extractBaseDir(params.Prefix)
+	if folderExists(fundKeysBaseDir) {
+		return fmt.Errorf("directory '%s' already exists. Please re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value", fundKeysBaseDir)
+	}
+	return nil
+}
+
+// Helper function to extract the first two levels of the path
+func extractBaseDir(prefix string) string {
+	parts := strings.Split(filepath.ToSlash(prefix), "/")
+	if len(parts) >= 3 {
+		return strings.Join(parts[:3], "/")
+	}
+	return prefix
+}
+
+// Helper function to check if a folder exists
+func folderExists(path string) bool {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return info.IsDir()
 }
 
 var _ BatchAction = FundAction{}
