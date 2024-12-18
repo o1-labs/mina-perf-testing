@@ -148,7 +148,7 @@ func (FundAction) Validate(rawParams json.RawMessage) error {
 		return fmt.Errorf("failed to unmarshal fund-keys params: %v", err)
 	}
 	fundKeysBaseDir := extractBaseDir(params.Prefix)
-	if directoryExists(fundKeysBaseDir) {
+	if pathExists(fundKeysBaseDir) {
 		return fmt.Errorf("directory '%s' already exists. Please re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value", fundKeysBaseDir)
 	}
 	return nil
@@ -163,13 +163,10 @@ func extractBaseDir(prefix string) string {
 	return prefix
 }
 
-// Helper function to check if a directory exists
-func directoryExists(path string) bool {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return info.IsDir()
+// Helper function to check if a path exists
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
 }
 
 var _ BatchAction = FundAction{}
