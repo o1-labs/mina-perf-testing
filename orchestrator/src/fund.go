@@ -142,7 +142,7 @@ func (FundAction) RunMany(config Config, actionIOs []ActionIO) error {
 	return nil
 }
 
-func (FundAction) Validate(config Config, rawParams json.RawMessage) error {
+func (FundAction) Validate(rawParams json.RawMessage) error {
 	var params FundParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return fmt.Errorf("failed to unmarshal fund-keys params: %v", err)

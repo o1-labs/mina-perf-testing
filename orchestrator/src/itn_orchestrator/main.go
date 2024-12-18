@@ -286,7 +286,7 @@ func main() {
 		}
 		batchAction, isBatchAction := action.(lib.BatchAction)
 		if isBatchAction {
-			if err := batchAction.Validate(config, params); err != nil {
+			if err := batchAction.Validate(params); err != nil {
 				fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
 				os.Exit(1)
 			}
