@@ -149,7 +149,7 @@ func (FundAction) Validate(rawParams json.RawMessage) error {
 	}
 	fundKeysBaseDir := extractBaseDir(params.Prefix)
 	if pathExists(fundKeysBaseDir) {
-		return fmt.Errorf("directory '%s' already exists. Please re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value", fundKeysBaseDir)
+		return fmt.Errorf("path '%s' already exists. Please re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value", fundKeysBaseDir)
 	}
 	return nil
 }
@@ -157,8 +157,8 @@ func (FundAction) Validate(rawParams json.RawMessage) error {
 // Helper function to extract the first two levels of the path
 func extractBaseDir(prefix string) string {
 	parts := strings.Split(filepath.ToSlash(prefix), "/")
-	if len(parts) >= 3 {
-		return strings.Join(parts[:3], "/")
+	if len(parts) > 3 {
+		return strings.Join(parts[:len(parts)-3], "/")
 	}
 	return prefix
 }
