@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -145,22 +144,13 @@ func (FundAction) RunMany(config Config, actionIOs []ActionIO) error {
 func (FundAction) Validate(rawParams json.RawMessage) error {
 	var params FundParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
-		return fmt.Errorf("failed to unmarshal fund-keys params: %v", err)
+		return fmt.Errorf("failed to unmarshal the 'fund-keys' params: %v", err)
 	}
-	fundKeysBaseDir := extractBaseDir(params.Prefix)
-	if pathExists(fundKeysBaseDir) {
-		return fmt.Errorf("path '%s' already exists. Please re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value", fundKeysBaseDir)
+	fundingKeysBaseDir := filepath.Dir(filepath.ToSlash(params.Prefix))
+	if pathExists(fundingKeysBaseDir) {
+		return fmt.Errorf("path '%s' already exists. Please re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value", fundingKeysBaseDir)
 	}
 	return nil
-}
-
-// Helper function to extract the first two levels of the path
-func extractBaseDir(prefix string) string {
-	parts := strings.Split(filepath.ToSlash(prefix), "/")
-	if len(parts) > 3 {
-		return strings.Join(parts[:len(parts)-3], "/")
-	}
-	return prefix
 }
 
 // Helper function to check if a path exists

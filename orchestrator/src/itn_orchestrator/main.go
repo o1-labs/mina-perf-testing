@@ -287,7 +287,7 @@ func main() {
 		batchAction, isBatchAction := action.(lib.BatchAction)
 		if isBatchAction {
 			if err := batchAction.Validate(params); err != nil {
-				log.Errorf("Error validating action %s for step %d: %v\n", cmd.Action, step, err)
+				log.Errorf("Error validating action '%s' for step %d: %v\n", cmd.Action, step, err)
 				os.Exit(1)
 			}
 			prevAction = batchAction
