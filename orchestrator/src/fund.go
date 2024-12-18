@@ -146,7 +146,7 @@ func (FundAction) Validate(rawParams json.RawMessage) error {
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return fmt.Errorf("failed to unmarshal the 'fund-keys' params: %v", err)
 	}
-	fundingKeysBaseDir := filepath.Dir(filepath.ToSlash(params.Prefix))
+	fundingKeysBaseDir := filepath.Dir(params.Prefix)
 	if pathExists(fundingKeysBaseDir) {
 		return fmt.Errorf("path '%s' already exists. Please re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value", fundingKeysBaseDir)
 	}
