@@ -269,14 +269,14 @@ func main() {
 			continue
 		}
 		cmd := *commandOrComment.command
+		if prevAction != nil && prevAction.Name() != cmd.Action {
+			handlePrevAction()
+		}
 		params, err := lib.ResolveParams(rconfig, step, cmd.Params)
 		if err != nil {
 			log.Errorf("Error resolving params for step %d: %v", step, err)
 			os.Exit(6)
 			return
-		}
-		if prevAction != nil && prevAction.Name() != cmd.Action {
-			handlePrevAction()
 		}
 		action := actions[cmd.Action]
 		if action == nil {
