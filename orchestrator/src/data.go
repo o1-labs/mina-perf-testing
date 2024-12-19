@@ -72,4 +72,5 @@ type Action interface {
 type BatchAction interface {
 	Action
 	RunMany(config Config, actionIOs []ActionIO) error
+	Validate(params json.RawMessage) error
 }

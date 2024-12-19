@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"sync"
 )
@@ -102,7 +103,7 @@ func memorize(cache map[string]struct{}, keys []string) bool {
 	return true
 }
 
-// Run consequetive commands that do not use common private keys in parallel
+// Run consecutive commands that do not use common private keys in parallel
 func (FundAction) RunMany(config Config, actionIOs []ActionIO) error {
 	if len(actionIOs) == 0 {
 		return nil
@@ -138,6 +139,24 @@ func (FundAction) RunMany(config Config, actionIOs []ActionIO) error {
 		}
 	}
 	return nil
+}
+
+func (FundAction) Validate(rawParams json.RawMessage) error {
+	var params FundParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return fmt.Errorf("failed to unmarshal the 'fund-keys' params: %v", err)
+	}
+	fundingKeysBaseDir := filepath.Dir(params.Prefix)
+	if pathExists(fundingKeysBaseDir) {
+		return fmt.Errorf("path '%s' already exists. Please re-generate script using unique experiment name or different '-fund-keys-dir' CLI argument value", fundingKeysBaseDir)
+	}
+	return nil
+}
+
+// Helper function to check if a path exists
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
 }
 
 var _ BatchAction = FundAction{}
