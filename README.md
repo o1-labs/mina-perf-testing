@@ -89,7 +89,7 @@ docker push o1labs/mina-perf-testing:experiments-api-<ENV_NAME>
 Example container start-up command:
 
 ```shell
-docker run -id -p 3003:3003 -env PSQL_CONNECTION_STRING="postgresql://postgres:postgres@localhost:5432/db" o1labs/mina-perf-testing:experiments-api-<ENV_NAME>
+docker run -id -p 3003:3003 --env PSQL_CONNECTION_STRING="postgresql://postgres:postgres@localhost:5432/db" o1labs/mina-perf-testing:experiments-api-<ENV_NAME>
 ```
 
 Where `<ENV_NAME>` is the environment name the backend is going to be used within.
