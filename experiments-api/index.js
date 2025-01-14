@@ -1,3 +1,4 @@
+import cors from "cors";
 import express from "express";
 import pg from "pg";
 
@@ -8,6 +9,8 @@ const port = process.env.PORT ?? 3003;
 const pool = new Pool({
   connectionString: process.env.PSQL_CONNECTION_STRING,
 });
+
+app.use(cors());
 
 app.get("/api/experiments", async (req, res) => {
   try {
