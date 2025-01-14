@@ -61,6 +61,7 @@ docker build \
   --build-arg FETCHER_HOST="http://localhost" \
   --build-arg FETCHER_PORT="4000" \
   --build-arg APP_CONFIG="fetcher" \
+  --build-arg EXPERIMENTS_BACKEND_API_ENDPOINT="http://localhost:3003/api/experiments" \
   -t mina-frontend-<ENV_NAME> .
 docker tag mina-frontend-<ENV_NAME> o1labs/mina-perf-testing:dashboard-<ENV_NAME>
 docker push o1labs/mina-perf-testing:dashboard-<ENV_NAME>
