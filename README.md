@@ -71,6 +71,30 @@ Where `<ENV_NAME>` is the environment name the dashboard was built for (consider
 This is required because the dashboard building procedure results in 100% client-side application, which is not aware of the environment it is running in.  
 Also please make sure that the `FETCHER_HOST` and `FETCHER_PORT` are publicly available (same reason as it was described above, the client-side application).
 
+### Experiments API
+
+The API backend for `mina-frontend` to fetch experiments data from DB.
+
+- [./experiments-api](./experiments-api)
+
+#### Build and publish
+
+```shell
+cd experiments-api
+docker build -t mina-experiments-api-<ENV_NAME> .
+docker tag mina-experiments-api-<ENV_NAME> o1labs/mina-perf-testing:experiments-api-<ENV_NAME>
+docker push o1labs/mina-perf-testing:experiments-api-<ENV_NAME>
+```
+
+Example container start-up command:
+
+```shell
+docker run -id -p 3003:3003 -env PSQL_CONNECTION_STRING="postgresql://postgres:postgres@localhost:5432/db" o1labs/mina-perf-testing:experiments-api-<ENV_NAME>
+```
+
+Where `<ENV_NAME>` is the environment name the backend is going to be used within.
+Also please make sure that the `PSQL_CONNECTION_STRING` is provided during the container startup procedure.
+
 ### In-memory uptime backend
 
 - [./uptime-backend](./uptime-backend)

@@ -48,9 +48,23 @@ services:
       FETCH_INTERVAL_MS: 5000
       ONLINE_URL: ${UPTIME_BACKEND_API_URL}
 
+  experiments-api:
+    depends_on:
+      - postgres
+    image: o1labs/mina-perf-testing:experiments-api-mvp-orchestrator
+    container_name: experiments-api
+    restart: always
+    networks:
+      - ${NETWORK_NAME}
+    ports:
+      - "3003:3003"
+    environment:
+      PSQL_CONNECTION_STRING: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+
   dashboard:
     depends_on:
       - log-fetcher
+      - experiments-api
     image: o1labs/mina-perf-testing:dashboard-mvp-orchestrator
     container_name: dashboard
     restart: always
