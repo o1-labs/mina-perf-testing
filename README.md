@@ -44,7 +44,7 @@ The `/experiment.script` attached volume takes precedence over the `GENERATOR_CL
 Where `/private-keys` should be the directory with the private keys file(s) that are going to be used during the experiment.
 
 You can find an example of the `orchestrator-config.json` file in the [./orchestrator/scripts/example-orchestrator-config.json](./orchestrator/scripts/example-orchestrator-config.json) file.
-And `GENERATOR_CLI_ARGS` environment variable example is the following:
+And `GENERATOR_CLI_ARGS` environment variable example can look like this:
 
 ```shell
 -base-tps 0.80 -max-cost -experiment-name ci-experiment -payment-receiver B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i -rounds 5 -round-stops 0 -stress-tps 0.80 -zkapp-ratio 0.90 -generate-privkeys 20 -privkeys-per-fund 2 -zkapp-soft-limit -1 -pause 30 private-keys/bp1
