@@ -24,7 +24,7 @@ fi
 if [[ -f "$SCRIPT_FILE" ]]; then
   echo "Using provided $SCRIPT_FILE file for the orchestrator."
 elif [[ -n "$GENERATOR_CLI_ARGS" ]]; then
-  echo "Generating experiment script using CLI arguments: $GENERATOR_CLI_ARGS"
+  echo "Generating experiment script using command: /generator $GENERATOR_CLI_ARGS >$SCRIPT_FILE"
   /generator $GENERATOR_CLI_ARGS >$SCRIPT_FILE
 else
   echo "Error: Either $SCRIPT_FILE file or GENERATOR_CLI_ARGS environment variable must be provided."
