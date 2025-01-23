@@ -38,5 +38,5 @@ if [[ ! -f "$SCRIPT_FILE" ]]; then
 fi
 
 # Launch the orchestrator with the configuration and experiment script
-echo "Starting orchestrator with configuration file and experiment script."
+echo "Starting orchestrator."
 exec /orchestrator /orchestrator-config.json <"$SCRIPT_FILE"
