@@ -27,6 +27,29 @@ docker tag mina-perf-testing-orchestrator o1labs/mina-perf-testing:orchestrator
 docker push o1labs/mina-perf-testing:orchestrator
 ```
 
+Example container start-up command:
+
+```shell
+docker run -id \
+  --env GENERATOR_CLI_ARGS="" \
+  --volume $(pwd)/orchestrator-config.json:/orchestrator-config.json \
+  --volume $(pwd)/private-keys:/private-keys \
+  --volume $(pwd)/experiment.script:/experiment.script \
+  o1labs/mina-perf-testing:orchestrator
+```
+
+The `/orchestrator-config.json`, `/private-keys` attached volumes and either `/experiment.script` attached volume or `GENERATOR_CLI_ARGS` environment variable are required for the container's successful start-up.  
+The `/experiment.script` attached volume takes precedence over the `GENERATOR_CLI_ARGS` environment variable that in other case will be used as the CLI arguments passed to the `generator` executable to generate the experiment script before launching the `orchestrator` executable.
+
+Where `/private-keys` should be the directory with the private keys file(s) that are going to be used during the experiment.
+
+You can find an example of the `orchestrator-config.json` file in the [./orchestrator/scripts/example-orchestrator-config.json](./orchestrator/scripts/example-orchestrator-config.json) file.
+And `GENERATOR_CLI_ARGS` environment variable example is the following:
+
+```shell
+-base-tps 0.80 -max-cost -experiment-name ci-experiment -payment-receiver B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i -rounds 5 -round-stops 0 -stress-tps 0.80 -zkapp-ratio 0.90 -generate-privkeys 20 -privkeys-per-fund 2 -zkapp-soft-limit -1 -pause 30 private-keys/bp1
+```
+
 ### Logs fetcher and consumer executables
 
 - [./internal-trace-consumer](./internal-trace-consumer)
