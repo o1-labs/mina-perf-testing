@@ -10,7 +10,7 @@ services:
     image: postgres:${POSTGRES_VERSION}
     container_name: postgres
     restart: always
-    command: "-c max_connections=10000 -c shared_buffers=2048MB"
+    command: "-c max_connections=10000 -c shared_buffers=2048MB -c log_connections=on -c log_disconnections=on -c log_min_messages=debug1 -c log_line_prefix='%t [%p]: [user=%u,db=%d,host=%h] '"
     networks:
       - ${NETWORK_NAME}
     ports:
