@@ -174,6 +174,14 @@ To generate many keys from a single originating key, use the following action:
 When no `password-env` is provided, empty password will be used to decode the originating private key (`./root-key`)
 and to encode new private keys (`./keys/key-0`, `./keys/key-1` ...).
 
+## Debug Printout
+
+You can enable debug printout of graphql requests by adding 
+
+`"printRequests":"true"` 
+
+in config.json **and** set `"logLevel":"debug"` or lower
+
 ## Build from sources
 
 - Make sure you have `Go v1.20+` installed.
