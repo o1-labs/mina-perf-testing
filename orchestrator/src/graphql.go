@@ -104,7 +104,12 @@ var _ graphql.Doer = (*SequentialAuthenticator)(nil)
 
 func NewGqlClient(config Config, addr NodeAddress) (*NodeEntry, error) {
 	url := "http://" + string(addr) + "/graphql"
-	authenticator := NewAuthenticator(config.Sk, http.DefaultClient)
+	httpClient := http.DefaultClient
+	if config.PrintRequests {
+		rt := RoundTripper{logger: config.Log}
+		httpClient = &http.Client{Transport: rt}
+	}
+	authenticator := NewAuthenticator(config.Sk, httpClient)
 	authClient := graphql.NewClient(url, authenticator)
 	resp, err := auth(config.Ctx, authClient)
 	if err != nil {

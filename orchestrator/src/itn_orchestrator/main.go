@@ -87,6 +87,7 @@ type AppConfig struct {
 	GenesisTimestamp itn_json_types.Time
 	ControlExec      string   `json:",omitempty"`
 	UrlOverrides     []string `json:",omitempty"`
+	PrintRequests    bool     `json:"printRequests,omitempty"`
 }
 
 func (config *AwsConfig) GetBucketName() string {
@@ -227,6 +228,7 @@ func main() {
 		ControlExec:      appConfig.ControlExec,
 		OnlineURL:        appConfig.OnlineURL,
 		UrlOverrides:     appConfig.UrlOverrides,
+		PrintRequests:    appConfig.PrintRequests,
 	}
 	if config.MinaExec == "" {
 		config.MinaExec = "mina"
