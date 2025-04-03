@@ -3,4 +3,4 @@
 	url = https://github.com/o1-labs/mina-frontend.git
 [submodule "internal-trace-consumer"]
 	path = internal-trace-consumer
-	url = https://github.com/georgeee/mina-internal-trace-consumer.git
+	url = https://github.com/o1-labs/mina-internal-trace-consumer.git
