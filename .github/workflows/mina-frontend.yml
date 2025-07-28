@@ -1,0 +1,16 @@
+name: Mina Frontend
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build Docker image
+        run: docker build -t mina-frontend:latest .
+        working-directory: ./mina-frontend
