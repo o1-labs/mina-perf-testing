@@ -15,7 +15,7 @@
         name = "mina-perf-testing";
         buildInputs = with pkgs; [ 
           stdenv 
-          go_1_20 
+          go 
           glibc 
         ];
       };
