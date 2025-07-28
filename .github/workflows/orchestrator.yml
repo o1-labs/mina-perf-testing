@@ -28,5 +28,5 @@ jobs:
         run: make test
         working-directory: ./orchestrator
       - name: Build Docker image
-        run: make docker-build
+        run: docker build -t orchestrator:latest .
         working-directory: ./orchestrator
