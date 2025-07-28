@@ -1,0 +1,32 @@
+name: Go
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: [ '1.20' ]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Display Go version
+        run: go version
+      - name: Build
+        run: make clean orchestrator generator
+        working-directory: ./orchestrator
+      - name: Lint
+        run: diff -u <(echo -n) <(gofmt -d ./)
+        working-directory: ./orchestrator/src
+      - name: Test
+        run: make test
+        working-directory: ./orchestrator
+      - name: Build Docker image
+        run: docker build -t orchestrator:latest .
+        working-directory: ./orchestrator
