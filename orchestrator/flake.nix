@@ -1,5 +1,5 @@
 {
-  description = "Mina performance testing environment";
+  description = "Mina orchestrator development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -12,7 +12,7 @@
     in
     {
       devShells.${system}.default = pkgs.mkShell {
-        name = "mina-perf-testing";
+        name = "orchestrator-dev";
         buildInputs = with pkgs; [ 
           stdenv 
           go_1_20 
