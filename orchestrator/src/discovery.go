@@ -180,6 +180,12 @@ func discoverParticipantsDo(config Config, params DiscoveryParams, output func(N
 
 func DiscoverParticipants(config Config, params DiscoveryParams, output func(NodeAddress)) (err error) {
 	for retryPause := 10; retryPause <= 40; retryPause = retryPause * 2 {
+		select {
+		case <-config.Ctx.Done():
+			return
+		default:
+		}
+
 		err = discoverParticipantsDo(config, params, output)
 		if err == nil {
 			return

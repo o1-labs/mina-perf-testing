@@ -1,0 +1,36 @@
+FROM golang:1.23.4-bullseye AS builder
+
+ARG PSQL_CONNECTION_STRING
+ENV PSQL_CONNECTION_STRING=${PSQL_CONNECTION_STRING}
+
+ARG CONFIG
+ENV CONFIG=${CONFIG} 
+
+WORKDIR /
+COPY . .
+RUN make orchestrator_service
+
+FROM debian:bullseye AS app
+COPY --from=builder /orchestrator_service /orchestrator_service
+
+RUN apt-get update --quiet --yes \
+  && apt-get upgrade --quiet --yes \
+  && apt-get install --quiet --yes --no-install-recommends \
+    apt-transport-https \
+    ca-certificates \
+    dnsutils \
+    gnupg2 \
+    libgmp10 \
+    libgomp1 \
+    libssl1.1 \
+    libpq-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN echo "downloading mina" \
+  && echo "deb [trusted=yes] https://packages.o1test.net bullseye experimental" > /etc/apt/sources.list.d/o1.list \
+  && apt-get update --quiet --yes \
+  && apt-get install --quiet --yes --allow-downgrades mina-devnet=3.1.1-alpha1-compatible-adb75bc \
+  && rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT [ "/bin/sh", "-c", "/orchestrator_service -conn \"$PSQL_CONNECTION_STRING\" -config \"$CONFIG\" -address \":9090\"" ]
+

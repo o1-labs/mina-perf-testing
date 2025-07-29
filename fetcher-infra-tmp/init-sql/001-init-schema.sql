@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS data (
   deployment_id INT NOT NULL,
   node_name VARCHAR NOT NULL,
   value TEXT NOT NULL,
-  PRIMARY KEY (key, node_name),
+  PRIMARY KEY (key, deployment_id, node_name),
   FOREIGN KEY (deployment_id) REFERENCES deployment(deployment_id)
 );
 
@@ -124,4 +124,25 @@ CREATE TABLE IF NOT EXISTS unique_txs (
   memo TEXT,
   time TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (hash)
+);
+
+CREATE TABLE IF NOT EXISTS EXPERIMENT_STATE (
+  name varchar PRIMARY KEY,
+  description varchar NOT NULL,
+  created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp DEFAULT CURRENT_TIMESTAMP,
+  ended_at timestamp,
+  status varchar NOT NULL,
+  comment varchar,
+  -- PENDING, RUNNING, DONE, ERROR
+  -- PENDING: experiment is pending to be started
+  -- RUNNING: experiment is running
+  -- DONE: experiment is done
+  -- ERROR: experiment has an error
+  setup_json jsonb NOT NULL,
+  current_step_no int,
+  current_step_name varchar,
+  warnings text[],
+  errors text[],
+  logs text[]
 );

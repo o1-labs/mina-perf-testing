@@ -28,15 +28,14 @@ services:
   log-fetcher:
     depends_on:
       - postgres
-    image: o1labs/mina-perf-testing:internal-trace-consumer
+    image: o1labs/mina-perf-testing:internal-trace-consumer-persistence
     container_name: log-fetcher
     restart: always
-    command: "fetcher -k /keys/fetcher_sk -o /output ${HOST_OVERRIDES} --db-uri 'postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}' discovery"
+    command: "fetcher -k /keys/fetcher_sk -o /output ${HOST_OVERRIDES} --db-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB} discovery"
     networks:
       - ${NETWORK_NAME}
     ports:
       - "4000:4000"
-      - "11000-11700:11000-11700"
     volumes:
       - ./keys:/keys
       - ./output:/output
@@ -48,10 +47,23 @@ services:
       FETCH_INTERVAL_MS: 5000
       ONLINE_URL: ${UPTIME_BACKEND_API_URL}
 
+
+  log-api:
+    depends_on:
+      - postgres
+    image: o1labs/mina-perf-testing:internal-trace-consumer-persistence
+    container_name: log-api
+    restart: always
+    command: "consumer --db-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+    networks:
+      - ${NETWORK_NAME}
+    ports:
+      - "9080:9080"
+
   experiments-api:
     depends_on:
       - postgres
-    image: o1labs/mina-perf-testing:experiments-api-mvp-orchestrator
+    image: o1labs/mina-perf-testing:experiments-api-persistence
     container_name: experiments-api
     restart: always
     networks:
@@ -65,7 +77,7 @@ services:
     depends_on:
       - log-fetcher
       - experiments-api
-    image: o1labs/mina-perf-testing:dashboard-mvp-orchestrator
+    image: o1labs/mina-perf-testing:dashboard-persistence
     container_name: dashboard
     restart: always
     networks:
@@ -82,10 +94,27 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./uptime-backend/config.json:/app/config.json
+      - ./uptime-backend/config.json:/app/config.json:ro
     environment:
-      NETWORK: "testnet"
+      NETWORK: ""
       CONFIG_FILE: "/app/config.json"
+
+  orchestrator-as-service:
+    depends_on:
+      - postgres
+    image: o1labs/mina-perf-testing:orchestrator-as-service-persistence
+    container_name: orchestrator-as-service
+    restart: always
+    networks:
+      - ${NETWORK_NAME}
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./orchestrator-as-service/config.json:/app/config.json:ro
+      - ./keys:/keys
+    environment:
+      PSQL_CONNECTION_STRING: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      CONFIG: /app/config.json
 
 volumes:
   postgres_data:

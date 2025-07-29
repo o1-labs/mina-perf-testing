@@ -189,3 +189,63 @@ in config.json **and** set `"logLevel":"debug"` or lower
 - Use `Makefile` targets to build executables:
   - `make generator`
   - `make orchestrator`
+
+# Orchestrator as Service
+
+The Orchestrator can be run as a service, exposing a set of HTTP endpoints to manage experiments. Below are the available endpoints:
+
+### 1. Run Experiment
+Starts a new experiment with the provided setup.
+
+```bash
+curl --location 'http://{host}:9090/api/v0/experiment/run' \
+--header 'Content-Type: application/json' \
+--data '{
+  "experiment_setup": {
+        "priv_keys":["/keys/plain1"],
+        "payment_receiver": "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i",
+        "experiment_name":"new_experiment",
+        "zkapp_ratio": 0.3,
+        "stress_tps": 0.5
+  }  
+}'
+```
+
+Where experiment_setup is complete generator config set.
+
+### 2. Check Experiment Status
+Retrieves the current status of the running experiment.
+
+```bash
+curl --location 'http://host:9090/api/v0/experiment/status'
+```
+
+### 3. Cancel Experiment
+Stops the currently running experiment.
+
+```bash
+curl --location --request POST 'http://hosts:9090/api/v0/experiment/cancel'
+```
+
+### 4. Test Experiment Setup
+Tests the experiment setup without actually running it.
+
+```bash
+curl --location 'http://localhost:9090/api/v0/experiment/test' \
+--header 'Content-Type: application/json' \
+--data '{
+  "experiment_setup": {
+        "priv_keys":["plain1"],
+        "payment_receiver": "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i",
+        "experiment_name":"exp",
+        "zkapp_ratio": 0.3,
+        "stress_tps": 0.5
+  }  
+}'
+```
+
+### Notes
+- Ensure the Orchestrator service is running and accessible at the specified host and port.
+- The `zkapp_ratio` and `stress_tps` parameters control the experiment's behavior and load.
+- Use appropriate paths for private keys and other resources.
+- The `test` endpoint is useful for validating configurations before running an actual experiment.

@@ -215,12 +215,18 @@ func selectNodes(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddre
 	return tps / nodesF, nodes[:nodesMax]
 }
 
-func retryOnMultipleServers(servers []string, serverIx int, commandName string, log logging.StandardLogger, try func(string) error) (err error) {
+func retryOnMultipleServers(servers []string, ctx context.Context, serverIx int, commandName string, log logging.StandardLogger, try func(string) error) (err error) {
 	server := ""
 	if len(servers) > 0 {
 		server = servers[serverIx]
 	}
 	for retryPause := 1; retryPause <= 16; retryPause = retryPause * 2 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		err = try(server)
 		if err == nil {
 			break
@@ -326,4 +332,12 @@ func execScanMina(ctx context.Context, minaExec string, args, env []string, scan
 		return err
 	}
 	return cmd.Wait()
+}
+
+func SetOrDefault[T any](src *T, dst *T, def T) {
+	if src != nil {
+		*dst = *src
+	} else {
+		*dst = def
+	}
 }

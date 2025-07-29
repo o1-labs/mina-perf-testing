@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"gorm.io/datatypes"
 )
 
 type GenParams struct {
@@ -30,6 +32,61 @@ type GenParams struct {
 	PaymentAmount, MinZkappFee, MaxZkappFee, FundFee                     uint64
 	MinPaymentFee, MaxPaymentFee                                         uint64
 	ZkappSoftLimit                                                       int
+}
+
+func (p *GenParams) ToJSON() (datatypes.JSON, error) {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to marshal setup to JSON: %v", err)
+	}
+	return data, nil
+}
+
+func DefaultGenParams() GenParams {
+	return GenParams{
+		MinTps:                 0.01,
+		BaseTps:                0.3,
+		StressTps:              1,
+		SenderRatio:            0.5,
+		ZkappRatio:             0.5,
+		NewAccountRatio:        0,
+		StopCleanRatio:         0.1,
+		MinStopRatio:           0.0,
+		MaxStopRatio:           0.5,
+		RoundDurationMin:       30,
+		PauseMin:               15,
+		Rounds:                 4,
+		StopsPerRound:          2,
+		Gap:                    180,
+		SendFromNonBpsOnly:     false,
+		StopOnlyBps:            false,
+		UseRestartScript:       false,
+		MaxCost:                false,
+		ExperimentName:         "exp-0",
+		PasswordEnv:            "",
+		FundKeyPrefix:          "./fund_keys",
+		Privkeys:               []string{},
+		PaymentReceiver:        "B62qn7v4x5g3Z1h8k2j6f9c5z5v5v5v5v5v5v5v5v5v5v5v5v5",
+		PrivkeysPerFundCmd:     1,
+		GenerateFundKeys:       20,
+		RotationKeys:           []string{},
+		RotationServers:        []string{},
+		RotationPermutation:    false,
+		RotationRatio:          0.3,
+		MixMaxCostTpsRatio:     0.0,
+		LargePauseEveryNRounds: 8,
+		LargePauseMin:          0,
+		MinBalanceChange:       0,
+		MaxBalanceChange:       1e3,
+		DeploymentFee:          1e9,
+		PaymentAmount:          1e5,
+		MinZkappFee:            1e9,
+		MaxZkappFee:            2e9,
+		FundFee:                1e9,
+		MinPaymentFee:          1e8,
+		MaxPaymentFee:          2e8,
+		ZkappSoftLimit:         -2,
+	}
 }
 
 type GeneratedCommand struct {
