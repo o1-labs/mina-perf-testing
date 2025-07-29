@@ -2,8 +2,6 @@ module itn_orchestrator
 
 go 1.23
 
-toolchain go1.24.4
-
 require (
 	github.com/Khan/genqlient v0.5.0
 	github.com/aws/aws-sdk-go-v2 v1.21.1
@@ -20,6 +18,9 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/agnivade/levenshtein v1.1.1 // indirect
+	github.com/alexflint/go-arg v1.4.2 // indirect
+	github.com/alexflint/go-scalar v1.0.0 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -30,8 +31,10 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	golang.org/x/mod v0.21.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gorm.io/driver/mysql v1.5.6 // indirect
 )
 
