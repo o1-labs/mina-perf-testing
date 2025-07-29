@@ -1,0 +1,30 @@
+name: Experiments API
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [ '18' ]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Display Node version
+        run: node --version
+        working-directory: ./experiments-api
+      - name: Install dependencies
+        run: npm install
+        working-directory: ./experiments-api
+      - name: Start API server (test)
+        run: timeout 10s npm run start || true
+        working-directory: ./experiments-api
+      - name: Build Docker image
+        run: docker build -t experiments-api:latest .
+        working-directory: ./experiments-api

@@ -3,17 +3,14 @@ alter table
 
 alter sequence block_trace_checkpoint_block_trace_checkpoint_id_seq as bigint;
 
-create type pool_action_t as ENUM('received', 'accepted', 'rejected');
-
-create type resource_t as ENUM('Transaction_diff', 'Snark_work');
-
-create table if not exists last_block_trace_gossip_checkpoint (
-  block_trace_id int4 not null,
-  resource resource_t not null,
-  action pool_action_t not null,
-  started_at timestamptz not null,
-  primary key (block_trace_id, resource)
-);
+CREATE OR REPLACE FUNCTION get_max_deployment_id() RETURNS bigint AS $$
+DECLARE
+  max_id bigint;
+BEGIN
+  SELECT MAX(deployment_id) INTO max_id FROM deployment;
+  RETURN max_id;
+END;
+$$ LANGUAGE 'plpgsql';
 
 CREATE
 OR REPLACE function gossip_traces_trigger() returns trigger AS $$ DECLARE nresource resource_t;
@@ -68,50 +65,22 @@ END;
 
 $$ LANGUAGE 'plpgsql';
 
-create
-or replace trigger gossip_traces_on_add before
-insert
-  on block_trace_checkpoint for each row
-  when (
+DROP TRIGGER IF EXISTS gossip_traces_on_add ON block_trace_checkpoint;
+CREATE TRIGGER gossip_traces_on_add BEFORE INSERT ON block_trace_checkpoint
+FOR EACH ROW
+WHEN (
     new.main_trace
-    and not new.is_control
-    and new.source = 'M'
-    and new.name in (
-      'Snark_work_received',
-      'Snark_work_rejected',
-      'Snark_work_accepted',
-      'Transaction_diff_received',
-      'Transaction_diff_rejected',
-      'Transaction_diff_accepted'
+    AND NOT new.is_control
+    AND new.source = 'M'
+    AND new.name IN (
+        'Snark_work_received',
+        'Snark_work_rejected',
+        'Snark_work_accepted',
+        'Transaction_diff_received',
+        'Transaction_diff_rejected',
+        'Transaction_diff_accepted'
     )
-  ) execute function gossip_traces_trigger();
-
-create table tx_traces (
-  block_trace_checkpoint_id bigint not null,
-  node_name varchar(255) not null,
-  action pool_action_t not null,
-  time timestamptz not null,
-  diff jsonb not null,
-  sender varchar(255),
-  reason text
-);
-
-CREATE UNIQUE INDEX tx_traces_id ON tx_traces (block_trace_checkpoint_id);
-
-create table sw_traces (
-  block_trace_checkpoint_id bigint not NULL,
-  node_name varchar(255) not NULL,
-  action pool_action_t not NULL,
-  time timestamptz not NULL,
-  fst_work_id int4 not NULL,
-  snd_work_id int4,
-  fee varchar(255) not NULL,
-  prover varchar(255) not null,
-  sender varchar(255),
-  reason text
-);
-
-CREATE UNIQUE INDEX sw_traces_id ON sw_traces (block_trace_checkpoint_id);
+) EXECUTE FUNCTION gossip_traces_trigger();
 
 CREATE
 OR REPLACE function sw_traces_add(id bigint, block_trace_id_ int4, metadata jsonb) returns setof sw_traces AS $$ begin return query
@@ -184,17 +153,15 @@ END;
 
 $$ LANGUAGE 'plpgsql';
 
-create
-or replace trigger sw_traces_on_add
-after
-insert
-  on block_trace_checkpoint for each row
-  when (
+DROP TRIGGER IF EXISTS sw_traces_on_add ON block_trace_checkpoint;
+CREATE TRIGGER sw_traces_on_add AFTER INSERT ON block_trace_checkpoint
+FOR EACH ROW
+WHEN (
     new.main_trace
-    and new.is_control
-    and new.source = 'M'
-    and new.metadata_json -> 'work_ids' is not NULL
-  ) execute function sw_traces_trigger();
+    AND new.is_control
+    AND new.source = 'M'
+    AND new.metadata_json -> 'work_ids' IS NOT NULL
+) EXECUTE FUNCTION sw_traces_trigger();
 
 CREATE
 OR REPLACE function tx_traces_add(id bigint, block_trace_id_ int4, metadata jsonb) returns setof tx_traces AS $$ begin return query
@@ -259,21 +226,20 @@ END;
 
 $$ LANGUAGE 'plpgsql';
 
-create
-or replace trigger tx_traces_on_add
-after
-insert
-  on block_trace_checkpoint for each row
-  when (
+DROP TRIGGER IF EXISTS tx_traces_on_add ON block_trace_checkpoint;
+CREATE TRIGGER tx_traces_on_add AFTER INSERT ON block_trace_checkpoint
+FOR EACH ROW
+WHEN (
     new.main_trace
-    and new.is_control
-    and new.source = 'M'
-    and new.metadata_json -> 'diff' is not NULL
-  ) execute function tx_traces_trigger();
+    AND new.is_control
+    AND new.source = 'M'
+    AND new.metadata_json -> 'diff' IS NOT NULL
+) EXECUTE FUNCTION tx_traces_trigger();
 
 create
 or replace view tx_diffs as
 select
+  t.deployment_id,
   t.time,
   t.diff,
   t.node_name,
@@ -284,6 +250,7 @@ select
 from
   (
     SELECT
+      get_max_deployment_id() deployment_id,
       t1.*,
       LEAD(t1.action) OVER w outcome,
       LEAD(t1.reason) over w outcome_reason,
@@ -303,33 +270,26 @@ where
 create
 or replace view received_txs as
 SELECT
+  get_max_deployment_id() deployment_id,
   t.node_name,
   t.time,
   t.sender,
   t.outcome_time,
   t.outcome,
   t.reason,
-  diff.value ->> 0 type,
+  diff.value ->> 0 "type",
   diff.value ->> 1 hash,
   diff.value ->> 2 memo
 FROM
   tx_diffs t
   cross JOIN jsonb_array_elements(t.diff) diff;
 
-create table block_txs (
-  hash varchar(128) not null,
-  type varchar(64) not null,
-  memo text,
-  block_received timestamptz not null,
-  result varchar(64) not null,
-  primary key (hash)
-);
-
 CREATE
 OR REPLACE function block_txs_trigger() returns trigger AS $$ begin
 insert into
-  block_txs as bt (hash, type, memo, block_received, result) (
+  block_txs as bt (deployment_id, hash, type, memo, block_received, result) (
     SELECT
+      get_max_deployment_id(),
       txs.value ->> 1,
       txs.value ->> 0,
       txs.value ->> 2,
@@ -351,31 +311,22 @@ END;
 
 $$ LANGUAGE 'plpgsql';
 
-create
-or replace trigger block_trace_handle_txs
-after
-update
-  on block_trace for each row
-  when (
-    new.metadata_json -> 'transactions' is not null
-    and new.trace_started_at > 1500000000
-  ) execute function block_txs_trigger();
-
-create table unique_txs (
-  hash varchar(128) not null,
-  type varchar(64) not null,
-  memo text,
-  time timestamptz not null,
-  primary key (hash)
-);
+DROP TRIGGER IF EXISTS block_trace_handle_txs ON block_trace;
+CREATE TRIGGER block_trace_handle_txs AFTER UPDATE ON block_trace
+FOR EACH ROW
+WHEN (
+    new.metadata_json -> 'transactions' IS NOT NULL
+    AND new.trace_started_at > 1500000000
+) EXECUTE FUNCTION block_txs_trigger();
 
 create index unique_txs_memo on unique_txs (memo);
 
 CREATE
 OR REPLACE function unique_txs_trigger() returns trigger AS $$ begin
 insert into
-  unique_txs as ut (type, hash, memo, time) (
+  unique_txs as ut (deployment_id, type, hash, memo, time) (
     select
+      get_max_deployment_id(),
       diff.value ->> 0,
       diff.value ->> 1,
       diff.value ->> 2,
@@ -393,18 +344,17 @@ END;
 
 $$ LANGUAGE 'plpgsql';
 
-create
-or replace trigger tx_traces_handle_txs
-after
-insert
-  on tx_traces for each row
-  when (new.action = 'received') execute function unique_txs_trigger();
+DROP TRIGGER IF EXISTS tx_traces_handle_txs ON tx_traces;
+CREATE TRIGGER tx_traces_handle_txs AFTER INSERT ON tx_traces
+FOR EACH ROW
+WHEN (new.action = 'received') EXECUTE FUNCTION unique_txs_trigger();
 
 create
 or replace view txs as
 select
+  u.deployment_id,
   coalesce(b.hash, u.hash) hash,
-  coalesce(b.type, u.type) type,
+  coalesce(b.type, u.type) "type",
   coalesce(b.memo, u.memo) memo,
   u.time,
   b.block_received,
@@ -412,7 +362,7 @@ select
   b.result
 from
   unique_txs u full
-  join block_txs b on u.hash = b.hash;
+  join block_txs b on u.hash = b.hash and u.deployment_id = b.deployment_id;
 
 create
 or replace view experiments as with txs_ as (
@@ -420,10 +370,15 @@ or replace view experiments as with txs_ as (
   --                                                                  -3       -2    -1
   select
     regexp_replace(memo, '-\d+-\d+-\d+$', '') as exp,
-    cast(
-      split_part(memo, '-', -3) as int
-    ) as round,
-    *
+    cast((regexp_matches(memo, '^(.*)-(\d+)-(\d+)-(\d+)$'))[2] as int) as round,
+    txs.deployment_id,
+    txs.hash,
+    txs.type,
+    txs.memo,
+    txs.time,
+    txs.block_received,
+    txs.latency,
+    txs.result
   from
     txs
   where
@@ -432,6 +387,7 @@ or replace view experiments as with txs_ as (
 select
   t.exp,
   t.round,
+  t.deployment_id,
   round(t.total * 60.0 / t.duration_sec, 2) as rate_min,
   round(t.zkapps * 60.0 / t.duration_sec, 2) as zkapp_rate_min,
   round((t.total - t.zkapps) * 60.0 / t.duration_sec, 2) as payment_rate_min,
@@ -484,6 +440,7 @@ from
     select
       exp,
       round,
+      deployment_id,
       count(*) as total,
       count(nullif(type, 'payment')) as zkapps,
       min(time) as first_tx_time,
@@ -501,10 +458,13 @@ from
       txs_
     group by
       exp,
-      round
+      round,
+      deployment_id
   ) t
 where
-  t.round is not null
+  t.round is not null and
+  t.deployment_id is not null
+
 order by
   first_tx_time;
 
@@ -526,24 +486,22 @@ END;
 
 $$ LANGUAGE 'plpgsql';
 
-create
-or replace trigger block_trace_update_started_at
-after
-insert
-  on block_trace_checkpoint for each row
-  when (
+DROP TRIGGER IF EXISTS block_trace_update_started_at ON block_trace_checkpoint;
+CREATE TRIGGER block_trace_update_started_at AFTER INSERT ON block_trace_checkpoint
+FOR EACH ROW
+WHEN (
     new.main_trace
-    and not new.is_control
-    and new.source = 'M'
-    and new.name not in (
-      'Snark_work_received',
-      'Snark_work_rejected',
-      'Snark_work_accepted',
-      'Transaction_diff_received',
-      'Transaction_diff_rejected',
-      'Transaction_diff_accepted'
+    AND NOT new.is_control
+    AND new.source = 'M'
+    AND new.name NOT IN (
+        'Snark_work_received',
+        'Snark_work_rejected',
+        'Snark_work_accepted',
+        'Transaction_diff_received',
+        'Transaction_diff_rejected',
+        'Transaction_diff_accepted'
     )
-  ) execute function block_trace_update_started_at_trigger();
+) EXECUTE FUNCTION block_trace_update_started_at_trigger();
 
 CREATE
 OR REPLACE function block_trace_update_status_trigger() returns trigger AS $$ begin if new.name = 'Breadcrumb_integrated' then
@@ -571,17 +529,15 @@ END;
 
 $$ LANGUAGE 'plpgsql';
 
-create
-or replace trigger block_trace_update_status
-after
-insert
-  on block_trace_checkpoint for each row
-  when (
+DROP TRIGGER IF EXISTS block_trace_update_status ON block_trace_checkpoint;
+CREATE TRIGGER block_trace_update_status AFTER INSERT ON block_trace_checkpoint
+FOR EACH ROW
+WHEN (
     new.main_trace
-    and not new.is_control
-    and new.source = 'M'
-    and new.name in ('Breadcrumb_integrated', 'Failure')
-  ) execute function block_trace_update_status_trigger();
+    AND NOT new.is_control
+    AND new.source = 'M'
+    AND new.name IN ('Breadcrumb_integrated', 'Failure')
+) EXECUTE FUNCTION block_trace_update_status_trigger();
 
 CREATE
 OR REPLACE function block_trace_update_source_trigger() returns trigger AS $$ declare new_source varchar(16);
@@ -610,19 +566,17 @@ END;
 
 $$ LANGUAGE 'plpgsql';
 
-create
-or replace trigger block_trace_update_source
-after
-insert
-  on block_trace_checkpoint for each row
-  when (
+DROP TRIGGER IF EXISTS block_trace_update_source ON block_trace_checkpoint;
+CREATE TRIGGER block_trace_update_source AFTER INSERT ON block_trace_checkpoint
+FOR EACH ROW
+WHEN (
     new.main_trace
-    and not new.is_control
-    and new.source = 'M'
-    and new.name in (
-      'External_block_received',
-      'Begin_block_production',
-      'To_download',
-      'Loaded_transition_from_storage'
+    AND NOT new.is_control
+    AND new.source = 'M'
+    AND new.name IN (
+        'External_block_received',
+        'Begin_block_production',
+        'To_download',
+        'Loaded_transition_from_storage'
     )
-  ) execute function block_trace_update_source_trigger();
+) EXECUTE FUNCTION block_trace_update_source_trigger();

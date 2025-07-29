@@ -1,0 +1,16 @@
+name: Internal Trace Consumer
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build Docker image
+        run: docker build -t internal-trace-consumer:latest .
+        working-directory: ./internal-trace-consumer
