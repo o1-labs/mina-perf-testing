@@ -55,7 +55,7 @@ func (RotateAction) Run(config Config, rawParams json.RawMessage, output OutputF
 	}
 	balances := make([]uint64, len(params.Pubkeys))
 	for i, pk := range params.Pubkeys {
-		err := retryOnMultipleServers(params.RestServers, i, "rotate-get-balance", config.Log, func(restServer string) error {
+		err := retryOnMultipleServers(params.RestServers, config.Ctx, i, "rotate-get-balance", config.Log, func(restServer string) error {
 			var err error
 			balances[i], err = getBalance(config, restServer, pk)
 			return err

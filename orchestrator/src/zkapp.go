@@ -120,6 +120,9 @@ func SendZkappCommands(config Config, params ZkappCommandParams, output func(Sch
 	if params.ZkappsToDeploy == 0 && params.Gap == 0 {
 		return errors.New("either zkappsToDeploy or gap parameters should be specified")
 	}
+	if len(params.Nodes) == 0 {
+		return errors.New("no nodes specified")
+	}
 	tps, nodes := selectNodes(params.Tps, params.MinTps, params.Nodes)
 	feePayersPerNode := len(params.FeePayers) / len(nodes)
 	successfulNodes := make([]NodeAddress, 0, len(nodes))

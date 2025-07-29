@@ -58,7 +58,7 @@ type Config struct {
 	PrintRequests      bool
 }
 
-type OutputF = func(name string, value any, multiple bool, sensitive bool)
+type OutputF = func(name string, value any, multiple bool, sensitive bool) error
 
 type ActionIO struct {
 	Params json.RawMessage

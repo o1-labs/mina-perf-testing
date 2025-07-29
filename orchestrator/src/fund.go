@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,10 +63,11 @@ func fundImpl(config Config, ctx context.Context, daemonPort string, params Fund
 			if daemonPort != "" {
 				args = append(args, "--daemon-port", daemonPort)
 			}
+			log.Println("Executing command with args:", args)
 			cmd := exec.CommandContext(ctx, config.MinaExec, args...)
 			cmd.Stderr = os.Stderr
 			cmd.Stdout = os.Stderr
-			cmd.Env = []string{"MINA_PRIVKEY_PASS=" + password}
+			cmd.Env = []string{"MINA_PRIVKEY_PASS=" + password, "ITN_FEATURES=1"}
 			spawnAction(cmd.Run)
 		}
 	})
@@ -77,7 +79,7 @@ func fundRunImpl(config Config, ctx context.Context, daemonPortIx int, params Fu
 	if params.PasswordEnv != "" {
 		password, _ = os.LookupEnv(params.PasswordEnv)
 	}
-	return retryOnMultipleServers(config.FundDaemonPorts, daemonPortIx, "fund", config.Log, func(daemonPort string) error {
+	return retryOnMultipleServers(config.FundDaemonPorts, ctx, daemonPortIx, "fund", config.Log, func(daemonPort string) error {
 		return fundImpl(config, ctx, daemonPort, params, amountPerKey, password)
 	})
 }
