@@ -46,7 +46,7 @@ func run(configFilename string) error {
 	}
 
 	lib.RunActions(inDecoder, config, outCache, log, step,
-		handlePrevAction, actionAccum, rconfig, &prevAction)
+		handlePrevAction, &actionAccum, rconfig, &prevAction)
 	if prevAction != nil {
 		if err := handlePrevAction(); err != nil {
 			return &lib.OrchestratorError{
