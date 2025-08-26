@@ -305,7 +305,6 @@ func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log 
 			})
 		} else {
 			log.Infof("Performing step %s (%d)", cmd.Action, step)
-			log.Debugf("Cache: %s, Params: %s", outCache, string(params))
 			err = action.Run(config, params, outputF(outCache, log, step))
 			if err != nil {
 				return &OrchestratorError{
