@@ -2,6 +2,14 @@
 
 This directory contains the Docker Compose infrastructure for running performance testing and monitoring of the Mina network. It provides a complete environment with log fetching, data persistence, dashboard visualization, and experiment orchestration.
 
+## Local Setup Checklist
+
+- Copy `.env.example` to `.env` and adjust values for your environment before booting the stack.
+- Replace the placeholder private key in `keys/fetcher_sk` with the base64-encoded key that has access to the target Mina nodes.
+- Provide a valid orchestrator configuration at `orchestrator-as-service/config.json` (for example by copying `../orchestrator/scripts/example-orchestrator-config.json` and editing it to match your network).
+- Review `uptime-backend/config.json` and either keep the provided in-memory whitelist or point it to your AWS bucket configuration.
+- Ensure the `output/` and `postgres_data/` folders exist or are writable so Docker can persist collected traces and the PostgreSQL data directory.
+
 ## Architecture Overview
 
 The system consists of several interconnected services that work together to provide comprehensive performance testing and monitoring capabilities:
@@ -50,11 +58,15 @@ The system follows this workflow pattern based on the tracing flow documentation
    cp .env.example .env
    # Edit .env with your specific configuration
    ```
-3. Start all services:
+3. Pull the published images referenced in `docker-compose.yaml`:
+   ```bash
+   docker compose pull
+   ```
+4. Start all services:
    ```bash
    docker compose up -d --remove-orphans
    ```
-4. Stop services when done:
+5. Stop services when done:
    ```bash
    docker compose down
    ```
@@ -65,7 +77,7 @@ The system follows this workflow pattern based on the tracing flow documentation
 - **Log Fetcher API**: http://localhost:4000
 - **Log Query API**: http://localhost:9080
 - **Experiments API**: http://localhost:3003
-- **Uptime Backend**: http://localhost:8080
+- **Uptime Backend**: http://localhost:8080/v1/online
 - **Orchestrator Service**: http://localhost:9090
 - **PostgreSQL**: localhost:5432
 
@@ -77,15 +89,16 @@ Key configuration options include:
 
 - `NETWORK_NAME`: Docker network name (default: o1labs-fetcher)
 - `POSTGRES_*`: Database connection settings
-- `UPTIME_BACKEND_API_URL`: URL for the uptime tracking service
+- `UPTIME_BACKEND_API_URL`: Full URL used for node discovery (for the bundled backend use `http://in-memory-uptime-backend:8080/v1/online`)
 - `HOST_OVERRIDES`: Host override settings for log fetching
 
 ### Service Configurations
 
 Individual services have their own configuration files:
 
-- `orchestrator-as-service/config.json`: Orchestrator service settings
+- `orchestrator-as-service/config.json`: Orchestrator service settings (start from `../orchestrator/scripts/example-orchestrator-config.json` and adjust to match your testnet)
 - `uptime-backend/config.json`: Uptime backend configuration
+- `keys/fetcher_sk`: Private key used by the log fetcher to authenticate with Mina nodes
 - `init-sql/`: Database initialization scripts
 
 ## API Usage Examples
