@@ -25,17 +25,14 @@ type CreateExperimentHandler struct {
 // Handle processes the create experiment request with well-typed input/output
 // This function creates a new experiment based on the provided setup parameters,
 // validates the input, generates the experiment configuration, and starts the experiment execution.
-func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputData) (*APIResponse, error) {
+// Returns (statusCode, errors) where statusCode indicates the type of response.
+func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputData) (int, []string) {
 	var p lib.GenParams
 	setup.ApplyWithDefaults(&p)
 
 	validationErrors := lib.ValidateAndCollectErrors(&p)
 	if len(validationErrors) > 0 {
-		return &APIResponse{
-			Errors:           []string{},
-			ValidationErrors: validationErrors,
-			Result:           "validation_failed",
-		}, nil
+		return http.StatusBadRequest, validationErrors
 	}
 
 	var errors []string
@@ -48,8 +45,7 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 		}
 	}
 	writeCommand := func(cmd lib.GeneratedCommand) {
-		comment := cmd.Comment()
-		if comment != "" {
+		if comment := cmd.Comment(); comment != "" {
 			writeComment(comment)
 		}
 		if err := encoder.Encode(cmd); err != nil {
@@ -58,20 +54,14 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 	}
 
 	if len(errors) > 0 {
-		return &APIResponse{
-			Errors: errors,
-			Result: "error",
-		}, nil
+		return http.StatusInternalServerError, errors
 	}
 
 	lib.Encode(&p, writeCommand, writeComment)
 
 	setup_json, err := p.ToJSON()
 	if err != nil {
-		return &APIResponse{
-			Errors: []string{fmt.Sprintf("Error converting to JSON: %v", err)},
-			Result: "error",
-		}, nil
+		return http.StatusInternalServerError, []string{fmt.Sprintf("Error converting to JSON: %v", err)}
 	}
 
 	job := &service.ExperimentState{
@@ -88,46 +78,57 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 	config := lib.SetupConfig(ctx, orchestratorConfig, log)
 
 	if err := h.Store.Add(job, cancel); err != nil {
-		return nil, fmt.Errorf("failed to add experiment: %v", err)
+		return http.StatusConflict, []string{fmt.Sprintf("failed to add experiment: %v", err)}
 	}
 
 	if err := h.Store.WriteExperimentToDB(*job); err != nil {
-		return nil, fmt.Errorf("failed to write experiment to database: %v", err)
+		return http.StatusInternalServerError, []string{fmt.Sprintf("failed to write experiment to database: %v", err)}
 	}
 
 	decoder := json.NewDecoder(strings.NewReader(result.String()))
 	go h.App.loadRun(decoder, config, log)
 
-	return &APIResponse{
-		Errors:           []string{},
-		ValidationErrors: []string{},
-		Result:           "success",
-	}, nil
+	return http.StatusOK, []string{}
 }
 
 // ServeHTTP implements the http.Handler interface
 func (h *CreateExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	experimentSetup, err := parseExperimentSetup(r, h.Store)
+	experimentSetup, err := parseExperimentSetup(r)
 	if err != nil {
-		writeErrorResponseWithStatus(w, []string{err.Error()})
+		writeResponse(w, http.StatusBadRequest, APIResponse{
+			Errors: []string{err.Error()},
+			Result: "error",
+		})
+		return
+	}
+	if !h.Store.CheckExperimentIsUnique(*experimentSetup.ExperimentName) {
+		writeResponse(w, http.StatusBadRequest, APIResponse{
+			Errors: []string{"experiment with the same name already exists"},
+			Result: "error",
+		})
 		return
 	}
 
-	response, err := h.Handle(experimentSetup)
-	if err != nil {
-		writeErrorResponse(w, http.StatusInternalServerError, []string{err.Error()})
-		return
+	statusCode, errors := h.Handle(experimentSetup)
+
+	// Determine result based on status code
+	var result string
+	switch statusCode {
+	case http.StatusOK:
+		result = "success"
+	case http.StatusBadRequest:
+		// Check if it's validation errors (from Handle method)
+		if len(errors) > 0 {
+			result = "invalid"
+		} else {
+			result = "error"
+		}
+	default:
+		result = "error"
 	}
 
-	if len(response.ValidationErrors) > 0 {
-		writeValidationErrorResponse(w, response.ValidationErrors)
-		return
-	}
-
-	if len(response.Errors) > 0 {
-		writeErrorResponseWithStatus(w, response.Errors)
-		return
-	}
-
-	writeSuccessResponse(w)
+	writeResponse(w, statusCode, APIResponse{
+		Errors: errors,
+		Result: result,
+	})
 }

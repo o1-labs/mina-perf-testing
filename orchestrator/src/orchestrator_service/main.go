@@ -82,7 +82,6 @@ func (a *App) Run(address string) {
 	}
 }
 
-
 func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.StandardLogger) {
 
 	outCache := lib.EmptyOutputCache()
@@ -145,10 +144,6 @@ func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.St
 	a.Store.FinishWithSuccess()
 	return
 }
-
-
-
-
 
 func main() {
 

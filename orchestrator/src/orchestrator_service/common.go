@@ -6,89 +6,28 @@ import (
 	"io"
 	"net/http"
 
-	service "itn_orchestrator/service"
 	service_inputs "itn_orchestrator/service/inputs"
 )
 
 // APIResponse represents the standard API response format
 type APIResponse struct {
-	Errors           []string `json:"errors,omitempty"`
-	ValidationErrors []string `json:"validation_errors,omitempty"`
-	Result           string   `json:"result,omitempty"`
+	Errors []string `json:"errors,omitempty"`
+	Result string   `json:"result,omitempty"`
 }
 
-// InfoExperimentResponse represents the response for experiment info endpoint
-type InfoExperimentResponse struct {
-	Setup  interface{} `json:"setup"`
-	Rounds []Round     `json:"rounds"`
-}
-
-// Round represents a single round in the experiment
-type Round struct {
-	No           int     `json:"no"`
-	PaymentsRate float64 `json:"payments_rate"`
-	ZkappRate    float64 `json:"zkapp_rate"`
-}
-
-// StatusResponse represents the response for status endpoint
-type StatusResponse struct {
-	*service.ExperimentState
-}
-
-// writeErrorResponse writes an error response with the given status code
-func writeErrorResponse(w http.ResponseWriter, statusCode int, errors []string) {
+// writeResponse writes a unified response with the given status code and APIResponse
+func writeResponse(w http.ResponseWriter, statusCode int, resp APIResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	if err := json.NewEncoder(w).Encode(
-		APIResponse{
-			Errors:           errors,
-			ValidationErrors: []string{},
-			Result:           "error",
-		},
-	); err != nil {
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-// writeErrorResponseWithStatus writes an error response with default bad request status
-func writeErrorResponseWithStatus(w http.ResponseWriter, errors []string) {
-	writeErrorResponse(w, http.StatusBadRequest, errors)
-}
-
-// writeValidationErrorResponse writes a validation error response
-func writeValidationErrorResponse(w http.ResponseWriter, validationErrors []string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusBadRequest)
-	if err := json.NewEncoder(w).Encode(
-		APIResponse{
-			Errors:           []string{},
-			ValidationErrors: validationErrors,
-			Result:           "validation_failed",
-		},
-	); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-// writeSuccessResponse writes a success response
-func writeSuccessResponse(w http.ResponseWriter) {
+// writeJSONResponse writes a JSON response with the given data (for non-APIResponse data)
+func writeJSONResponse(w http.ResponseWriter, data struct{ Result interface{} }) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(
-		APIResponse{
-			Errors:           []string{},
-			ValidationErrors: []string{},
-			Result:           "success",
-		},
-	); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-// writeJSONResponse writes a JSON response with the given data
-func writeJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -103,7 +42,7 @@ func validateContentLength(r *http.Request, maxSize int64) error {
 }
 
 // parseExperimentSetup parses the experiment setup from request body
-func parseExperimentSetup(r *http.Request, store *service.Store) (*service_inputs.GeneratorInputData, error) {
+func parseExperimentSetup(r *http.Request) (*service_inputs.GeneratorInputData, error) {
 	// Limit request body size to prevent abuse
 	const maxRequestSize = 1024 * 1024 // 1MB
 	if err := validateContentLength(r, maxRequestSize); err != nil {
@@ -116,22 +55,26 @@ func parseExperimentSetup(r *http.Request, store *service.Store) (*service_input
 		return nil, fmt.Errorf("failed to decode request body: %v", err)
 	}
 
-	if !store.CheckExperimentIsUnique(*experimentSetup.ExperimentName) {
-		return nil, fmt.Errorf("experiment with the same name already exists")
-	}
-
 	return &experimentSetup, nil
 }
 
 // Legacy API response functions for backward compatibility
 func ValidationError(validationErrors []string, w http.ResponseWriter) {
-	writeValidationErrorResponse(w, validationErrors)
+	writeResponse(w, http.StatusBadRequest, APIResponse{
+		Errors: validationErrors,
+		Result: "invalid",
+	})
 }
 
 func Error(errors []string, w http.ResponseWriter) {
-	writeErrorResponseWithStatus(w, errors)
+	writeResponse(w, http.StatusBadRequest, APIResponse{
+		Errors: errors,
+		Result: "error",
+	})
 }
 
 func Success(w http.ResponseWriter) {
-	writeSuccessResponse(w)
+	writeResponse(w, http.StatusOK, APIResponse{
+		Result: "success",
+	})
 }

@@ -6,11 +6,6 @@ import (
 	service "itn_orchestrator/service"
 )
 
-// CancelResponse represents the response for cancel endpoint
-type CancelResponse struct {
-	Result string `json:"result"`
-}
-
 // CancelHandler handles experiment cancellation requests
 type CancelHandler struct {
 	Store *service.Store
@@ -19,20 +14,23 @@ type CancelHandler struct {
 // Handle processes the cancel request with well-typed input/output
 // This function cancels the currently running experiment by stopping its execution
 // and updating its status to cancelled.
-func (h *CancelHandler) Handle() (*CancelResponse, error) {
+func (h *CancelHandler) Handle() error {
 	if err := h.Store.Cancel(); err != nil {
-		return nil, err
+		return err
 	}
-	return &CancelResponse{Result: "canceled"}, nil
+	return nil
 }
 
 // ServeHTTP implements the http.Handler interface
 func (h *CancelHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	response, err := h.Handle()
-	if err != nil {
-		writeErrorResponse(w, http.StatusConflict, []string{err.Error()})
+	if err := h.Handle(); err != nil {
+		writeResponse(w, http.StatusConflict, APIResponse{
+			Errors: []string{err.Error()},
+			Result: "error",
+		})
 		return
 	}
-
-	writeJSONResponse(w, http.StatusOK, response)
+	writeResponse(w, http.StatusOK, APIResponse{
+		Result: "canceled",
+	})
 }

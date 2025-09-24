@@ -18,6 +18,19 @@ type InfoExperimentHandler struct {
 	Store *service.Store
 }
 
+// InfoExperimentResponse represents the response for experiment info endpoint
+type InfoExperimentResponse struct {
+	Setup  interface{} `json:"setup"`
+	Rounds []Round     `json:"rounds"`
+}
+
+// Round represents a single round in the experiment
+type Round struct {
+	No           int     `json:"no"`
+	PaymentsRate float64 `json:"payments_rate"`
+	ZkappRate    float64 `json:"zkapp_rate"`
+}
+
 // Handle processes the experiment info request with well-typed input/output
 // This function validates the experiment setup parameters and returns detailed information
 // about the experiment configuration including setup JSON and round information.
@@ -110,9 +123,19 @@ func (h *InfoExperimentHandler) Handle(setup *service_inputs.GeneratorInputData)
 
 // ServeHTTP implements the http.Handler interface
 func (h *InfoExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	experimentSetup, err := parseExperimentSetup(r, h.Store)
+	experimentSetup, err := parseExperimentSetup(r)
 	if err != nil {
-		writeErrorResponseWithStatus(w, []string{err.Error()})
+		writeResponse(w, http.StatusBadRequest, APIResponse{
+			Errors: []string{err.Error()},
+			Result: "error",
+		})
+		return
+	}
+	if !h.Store.CheckExperimentIsUnique(*experimentSetup.ExperimentName) {
+		writeResponse(w, http.StatusBadRequest, APIResponse{
+			Errors: []string{"experiment with the same name already exists"},
+			Result: "error",
+		})
 		return
 	}
 
@@ -124,13 +147,19 @@ func (h *InfoExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			errorMsg := err.Error()
 			if strings.Contains(errorMsg, "validation failed: ") {
 				validationErrorsStr := strings.TrimPrefix(errorMsg, "validation failed: ")
-				writeValidationErrorResponse(w, []string{validationErrorsStr})
+				writeResponse(w, http.StatusBadRequest, APIResponse{
+					Errors: []string{validationErrorsStr},
+					Result: "invalid",
+				})
 				return
 			}
 		}
-		writeErrorResponseWithStatus(w, []string{err.Error()})
+		writeResponse(w, http.StatusBadRequest, APIResponse{
+			Errors: []string{err.Error()},
+			Result: "error",
+		})
 		return
 	}
 
-	writeJSONResponse(w, http.StatusOK, response)
+	writeJSONResponse(w, struct{ Result interface{} }{Result: response})
 }

@@ -27,8 +27,11 @@ func (h *StatusHandler) Handle() (*service.ExperimentState, error) {
 func (h *StatusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	job, err := h.Handle()
 	if err != nil {
-		writeErrorResponse(w, http.StatusNotFound, []string{err.Error()})
+		writeResponse(w, http.StatusNotFound, APIResponse{
+			Errors: []string{err.Error()},
+			Result: "error",
+		})
 		return
 	}
-	writeJSONResponse(w, http.StatusOK, job)
+	writeJSONResponse(w, struct{ Result interface{} }{Result: job})
 }
