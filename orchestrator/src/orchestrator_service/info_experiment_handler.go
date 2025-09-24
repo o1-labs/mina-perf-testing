@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -47,27 +46,9 @@ func (h *InfoExperimentHandler) Handle(setup *service_inputs.GeneratorInputData)
 	var rounds []Round
 	var result strings.Builder
 
-	encoder := json.NewEncoder(&result)
-	writeComment := func(comment string) {
-		if err := encoder.Encode(comment); err != nil {
-			errors = append(errors, fmt.Sprintf("Error writing comment: %v", err))
-		}
+	if err := lib.EncodeToWriter(&p, &result); err != nil {
+		return nil, fmt.Errorf("encoding errors: %v", err)
 	}
-	writeCommand := func(cmd lib.GeneratedCommand) {
-		comment := cmd.Comment()
-		if comment != "" {
-			writeComment(comment)
-		}
-		if err := encoder.Encode(cmd); err != nil {
-			errors = append(errors, fmt.Sprintf("Error writing command: %v", err))
-		}
-	}
-
-	if len(errors) > 0 {
-		return nil, fmt.Errorf("encoding errors: %v", errors)
-	}
-
-	lib.Encode(&p, writeCommand, writeComment)
 
 	setup_json, err := p.ToJSON()
 	if err != nil {

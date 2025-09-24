@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -91,23 +90,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	encoder := json.NewEncoder(os.Stdout)
-	writeComment := func(comment string) {
-		if err := encoder.Encode(comment); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing comment: %v\n", err)
-			os.Exit(3)
-		}
+	if err := lib.EncodeToWriter(&p, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding: %v\n", err)
+		os.Exit(3)
 	}
-
-	writeCommand := func(cmd lib.GeneratedCommand) {
-		comment := cmd.Comment()
-		if comment != "" {
-			writeComment(comment)
-		}
-		if err := encoder.Encode(cmd); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing command: %v\n", err)
-			os.Exit(3)
-		}
-	}
-	lib.Encode(&p, writeCommand, writeComment)
 }

@@ -35,29 +35,10 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 		return http.StatusBadRequest, validationErrors
 	}
 
-	var errors []string
 	var result strings.Builder
-
-	encoder := json.NewEncoder(&result)
-	writeComment := func(comment string) {
-		if err := encoder.Encode(comment); err != nil {
-			errors = append(errors, fmt.Sprintf("Error writing comment: %v", err))
-		}
+	if err := lib.EncodeToWriter(&p, &result); err != nil {
+		return http.StatusInternalServerError, []string{err.Error()}
 	}
-	writeCommand := func(cmd lib.GeneratedCommand) {
-		if comment := cmd.Comment(); comment != "" {
-			writeComment(comment)
-		}
-		if err := encoder.Encode(cmd); err != nil {
-			errors = append(errors, fmt.Sprintf("Error writing command: %v", err))
-		}
-	}
-
-	if len(errors) > 0 {
-		return http.StatusInternalServerError, errors
-	}
-
-	lib.Encode(&p, writeCommand, writeComment)
 
 	setup_json, err := p.ToJSON()
 	if err != nil {

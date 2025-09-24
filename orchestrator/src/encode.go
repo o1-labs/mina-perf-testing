@@ -1,13 +1,43 @@
 package itn_orchestrator
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
 
 func fund(p FundParams) GeneratedCommand {
 	return GeneratedCommand{Action: FundAction{}.Name(), Params: p}
+}
+
+// EncodeToWriter encodes experiment parameters to a writer using JSON encoding
+// Returns error instead of calling os.Exit for better error handling
+func EncodeToWriter(p *GenParams, writer io.Writer) error {
+	encoder := json.NewEncoder(writer)
+	var errors []string
+	
+	writeComment := func(comment string) {
+		if err := encoder.Encode(comment); err != nil {
+			errors = append(errors, fmt.Sprintf("Error writing comment: %v", err))
+		}
+	}
+	writeCommand := func(cmd GeneratedCommand) {
+		if comment := cmd.Comment(); comment != "" {
+			writeComment(comment)
+		}
+		if err := encoder.Encode(cmd); err != nil {
+			errors = append(errors, fmt.Sprintf("Error writing command: %v", err))
+		}
+	}
+	
+	Encode(p, writeCommand, writeComment)
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("encoding errors: %s", strings.Join(errors, "; "))
+	}
+	return nil
 }
 
 func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func(string)) {
