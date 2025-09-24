@@ -36,7 +36,7 @@ type App struct {
 func (a *App) initializeRoutes() {
 	log.Println("Registering routes...")
 
-	a.Router.HandleFunc("/api/v0/experiment/run", a.createExperimentHandler()).Methods(http.MethodPost)
+	a.Router.HandleFunc("/api/v0/experiment/run", a.createExperimentHandler).Methods(http.MethodPost)
 	a.Router.HandleFunc("/api/v0/experiment/test", a.infoExperimentHandler).Methods(http.MethodPost)
 	a.Router.HandleFunc("/api/v0/experiment/status", a.statusHandler).Methods(http.MethodGet)
 	a.Router.HandleFunc("/api/v0/experiment/cancel", a.cancelHandler()).Methods(http.MethodPost)
@@ -322,109 +322,97 @@ func Success(w http.ResponseWriter) {
 }
 
 func (a *App) GetExperimentSetup(r http.Request) (*service_inputs.GeneratorInputData, error) {
-
-	var input service_inputs.Input
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var experimentSetup service_inputs.GeneratorInputData
+	if err := json.NewDecoder(r.Body).Decode(&experimentSetup); err != nil {
 		return nil, fmt.Errorf("Failed to decode request body: %v", err)
-	}
-
-	experimentSetup := input.ExperimentSetup
-
-	if input.ExperimentSetup == nil {
-		return nil, fmt.Errorf("Experiment setup is required")
 	}
 
 	if !a.Store.CheckExperimentIsUnique(*experimentSetup.ExperimentName) {
 		return nil, fmt.Errorf("Experiment with the same name already exists")
 	}
-	return experimentSetup, nil
+	return &experimentSetup, nil
 }
 
-func (a *App) createExperimentHandler() func(w http.ResponseWriter, r *http.Request) {
+func (a *App) createExperimentHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	experimentSetup, err := a.GetExperimentSetup(*r)
 
-		var input service_inputs.Input
-
-		experimentSetup, err := a.GetExperimentSetup(*r)
-
-		if err != nil {
-			Error([]string{err.Error()}, w)
-			return
-		}
-
-		var p lib.GenParams
-		experimentSetup.ApplyWithDefaults(&p)
-
-		validationErrors := lib.ValidateAndCollectErrors(&p)
-
-		if len(validationErrors) > 0 {
-			ValidationError(validationErrors, w)
-			return
-		}
-
-		var errors []string
-		var result strings.Builder
-
-		encoder := json.NewEncoder(&result)
-		writeComment := func(comment string) {
-			if err := encoder.Encode(comment); err != nil {
-				errors = append(errors, fmt.Sprintf("Error writing comment: %v", err))
-			}
-		}
-		writeCommand := func(cmd lib.GeneratedCommand) {
-			comment := cmd.Comment()
-			if comment != "" {
-				writeComment(comment)
-			}
-			if err := encoder.Encode(cmd); err != nil {
-				errors = append(errors, fmt.Sprintf("Error writing command: %v", err))
-			}
-		}
-
-		if len(errors) > 0 {
-			Error(errors, w)
-			return
-		}
-
-		lib.Encode(&p, writeCommand, writeComment)
-
-		setup_json, err := p.ToJSON()
-		if err != nil {
-			Error([]string{fmt.Sprintf("Error converting to JSON: %v", err)}, w)
-			return
-		}
-
-		job := &service.ExperimentState{Name: *experimentSetup.ExperimentName, Status: "running", CreatedAt: time.Now(),
-			SetupJSON: setup_json,
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-
-		orchestratorConfig := input.GetOrchestratorConfig(a.Config)
-
-		log := service.StoreLogging{Store: a.Store, Log: logging.Logger("orchestrator")}
-		config := lib.SetupConfig(ctx, orchestratorConfig, log)
-
-		if err := a.Store.Add(job, cancel); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-
-		if err := a.Store.WriteExperimentToDB(*job); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		decoder := json.NewDecoder(strings.NewReader(result.String()))
-
-		println("Starting experiment with setup: ", result.String())
-
-		go a.loadRun(decoder, config, log)
-
-		Success(w)
+	if err != nil {
+		Error([]string{err.Error()}, w)
+		return
 	}
+
+	var p lib.GenParams
+	experimentSetup.ApplyWithDefaults(&p)
+
+	validationErrors := lib.ValidateAndCollectErrors(&p)
+
+	if len(validationErrors) > 0 {
+		ValidationError(validationErrors, w)
+		return
+	}
+
+	var errors []string
+	var result strings.Builder
+
+	encoder := json.NewEncoder(&result)
+	writeComment := func(comment string) {
+		if err := encoder.Encode(comment); err != nil {
+			errors = append(errors, fmt.Sprintf("Error writing comment: %v", err))
+		}
+	}
+	writeCommand := func(cmd lib.GeneratedCommand) {
+		comment := cmd.Comment()
+		if comment != "" {
+			writeComment(comment)
+		}
+		if err := encoder.Encode(cmd); err != nil {
+			errors = append(errors, fmt.Sprintf("Error writing command: %v", err))
+		}
+	}
+
+	if len(errors) > 0 {
+		Error(errors, w)
+		return
+	}
+
+	lib.Encode(&p, writeCommand, writeComment)
+
+	setup_json, err := p.ToJSON()
+	if err != nil {
+		Error([]string{fmt.Sprintf("Error converting to JSON: %v", err)}, w)
+		return
+	}
+
+	job := &service.ExperimentState{Name: *experimentSetup.ExperimentName, Status: "running", CreatedAt: time.Now(),
+		SetupJSON: setup_json,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	orchestratorConfig := *a.Config
+
+	log := service.StoreLogging{Store: a.Store, Log: logging.Logger("orchestrator")}
+	config := lib.SetupConfig(ctx, orchestratorConfig, log)
+
+	if err := a.Store.Add(job, cancel); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+
+	if err := a.Store.WriteExperimentToDB(*job); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(result.String()))
+
+	println("Starting experiment with setup: ", result.String())
+
+	go a.loadRun(decoder, config, log)
+
+	Success(w)
 }
 
 func main() {
