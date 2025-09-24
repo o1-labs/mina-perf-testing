@@ -28,7 +28,6 @@ type GeneratorInputData struct {
 	StopsPerRound          *int                          `json:"stops_per_round,omitempty"`
 	Gap                    *int                          `json:"gap,omitempty"`
 	ZkappSoftLimit         *int                          `json:"zkapp_soft_limit,omitempty"`
-	Mode                   *string                       `json:"mode,omitempty"`
 	FundKeyPrefix          *string                       `json:"fund_key_prefix,omitempty"`
 	PasswordEnv            *string                       `json:"password_env,omitempty"`
 	PaymentReceiver        *itn_json_types.MinaPublicKey `json:"payment_receiver,omitempty"`

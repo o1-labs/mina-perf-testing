@@ -6,6 +6,7 @@ user.bazelrc
 result/
 generator
 orchestrator
+orchestrator_service
 
 # Binaries for programs and plugins
 *.exe
