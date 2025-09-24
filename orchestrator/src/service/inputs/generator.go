@@ -11,7 +11,7 @@ type GeneratorInputData struct {
 	BaseTps                *float64                      `json:"base_tps,omitempty"`
 	StressTps              *float64                      `json:"stress_tps,omitempty"`
 	MinTps                 *float64                      `json:"min_tps,omitempty"`
-	MixMaxCostTpsRatio     *float64                      `json:"mix_max_cost_tps_ratio,omitempty"`
+	MaxCostMixedTpsRatio   *float64                      `json:"max_cost_mixed_tps_ratio,omitempty"`
 	MinStopRatio           *float64                      `json:"min_stop_ratio,omitempty"`
 	MaxStopRatio           *float64                      `json:"max_stop_ratio,omitempty"`
 	SenderRatio            *float64                      `json:"sender_ratio,omitempty"`
@@ -54,8 +54,6 @@ type GeneratorInputData struct {
 	} `json:"fees,omitempty"`
 }
 
-const mixMaxCostTpsRatioHelp = "when provided, specifies ratio of tps (proportional to total tps) for max cost transactions to be used every other round, zkapps ratio for these rounds is set to 100%"
-
 func (inputData *GeneratorInputData) ApplyWithDefaults(p *lib.GenParams) {
 
 	var defaults = lib.DefaultGenParams()
@@ -66,7 +64,7 @@ func (inputData *GeneratorInputData) ApplyWithDefaults(p *lib.GenParams) {
 	lib.SetOrDefault(inputData.BaseTps, &p.BaseTps, defaults.BaseTps)
 	lib.SetOrDefault(inputData.StressTps, &p.StressTps, defaults.StressTps)
 	lib.SetOrDefault(inputData.MinTps, &p.MinTps, defaults.MinTps)
-	lib.SetOrDefault(inputData.MixMaxCostTpsRatio, &p.MixMaxCostTpsRatio, defaults.MixMaxCostTpsRatio)
+	lib.SetOrDefault(inputData.MaxCostMixedTpsRatio, &p.MaxCostMixedTpsRatio, defaults.MaxCostMixedTpsRatio)
 	lib.SetOrDefault(inputData.MinStopRatio, &p.MinStopRatio, defaults.MinStopRatio)
 	lib.SetOrDefault(inputData.MaxStopRatio, &p.MaxStopRatio, defaults.MaxStopRatio)
 	lib.SetOrDefault(inputData.SenderRatio, &p.SenderRatio, defaults.SenderRatio)

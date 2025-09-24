@@ -26,7 +26,7 @@ type GenParams struct {
 	RotationKeys, RotationServers                                        []string
 	RotationPermutation                                                  bool
 	RotationRatio                                                        float64
-	MixMaxCostTpsRatio                                                   float64
+	MaxCostMixedTpsRatio                                                 float64
 	LargePauseEveryNRounds, LargePauseMin                                int
 	MinBalanceChange, MaxBalanceChange, DeploymentFee                    uint64
 	PaymentAmount, MinZkappFee, MaxZkappFee, FundFee                     uint64
@@ -73,7 +73,7 @@ func DefaultGenParams() GenParams {
 		RotationServers:        []string{},
 		RotationPermutation:    false,
 		RotationRatio:          0.3,
-		MixMaxCostTpsRatio:     0.0,
+		MaxCostMixedTpsRatio:   0.0,
 		LargePauseEveryNRounds: 8,
 		LargePauseMin:          0,
 		MinBalanceChange:       0,
@@ -318,10 +318,10 @@ func (p *GenParams) Generate(round int) GeneratedRound {
 	tps := SampleTps(p.BaseTps, p.StressTps)
 	maxCost := p.MaxCost
 	zkappRatio := p.ZkappRatio
-	if p.MixMaxCostTpsRatio > 1e-3 && (round&1) == 1 {
+	if p.MaxCostMixedTpsRatio > 1e-3 && (round&1) == 1 {
 		maxCost = true
 		zkappRatio = 1
-		tps *= p.MixMaxCostTpsRatio
+		tps *= p.MaxCostMixedTpsRatio
 	}
 	experimentName := fmt.Sprintf("%s-%d", p.ExperimentName, round)
 	onlyZkapps := math.Abs(1-zkappRatio) < 1e-3
