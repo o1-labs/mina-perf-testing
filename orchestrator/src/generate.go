@@ -47,7 +47,7 @@ func DefaultGenParams() GenParams {
 		MinTps:                 0.01,
 		BaseTps:                0.3,
 		StressTps:              1,
-		SenderRatio:            0.5,
+		SenderRatio:            1,
 		ZkappRatio:             0.5,
 		NewAccountRatio:        0,
 		StopCleanRatio:         0.1,
