@@ -83,66 +83,20 @@ func (a *App) Run(address string) {
 }
 
 func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.StandardLogger) {
-
-	outCache := lib.EmptyOutputCache()
-	rconfig := lib.ResolutionConfig{
-		OutputCache: outCache,
-	}
-	step := 0
-	var prevAction lib.BatchAction
-	var actionAccum []lib.ActionIO
-	handlePrevAction := func() error {
-		var start int
-		if step-len(actionAccum) > 0 {
-			start = step - len(actionAccum)
-		} else {
-			start = 0
-		}
-		var end int
-		if step-1 > 0 {
-			end = step - 1
-		} else {
-			end = 0
-		}
-		log.Infof("Performing steps %s (%d-%d)", prevAction.Name(), start, end)
-		err := prevAction.RunMany(config, actionAccum)
-		if err != nil {
-			return &lib.OrchestratorError{
-				Message: fmt.Sprintf("Error running steps %d-%d: %v", start, end, err),
-				Code:    9,
-			}
-		}
-		prevAction = nil
-		actionAccum = nil
-		return nil
-	}
-	err := lib.RunActions(inDecoder, config, outCache, log, step,
-		handlePrevAction, &actionAccum, rconfig, &prevAction)
+	err := lib.RunExperiment(inDecoder, config, log)
 	if err != nil {
-		if err, ok := err.(*lib.OrchestratorError); ok {
-			log.Errorf("Experiment finished with error: %v", err)
-			a.Store.FinishWithError(err)
-			return
+		if orchErr, ok := err.(*lib.OrchestratorError); ok {
+			a.Store.FinishWithError(orchErr)
+		} else {
+			// Convert other errors to OrchestratorError
+			a.Store.FinishWithError(&lib.OrchestratorError{
+				Message: fmt.Sprintf("Experiment failed: %v", err),
+				Code:    9,
+			})
 		}
-	}
-
-	if prevAction != nil {
-		if err := handlePrevAction(); err != nil {
-			log.Errorf("Error running action: %s due to: %v", prevAction.Name(), err)
-			// If context is canceled, we don't want to finish with error
-			// because it means the user canceled the experiment
-			if config.Ctx.Err() == nil {
-				a.Store.FinishWithError(&lib.OrchestratorError{
-					Message: fmt.Sprintf("Error running previous action: %v", err),
-					Code:    9,
-				})
-			}
-			return
-
-		}
+		return
 	}
 	a.Store.FinishWithSuccess()
-	return
 }
 
 func main() {

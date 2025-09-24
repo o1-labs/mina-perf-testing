@@ -23,39 +23,9 @@ func run(configFilename string) error {
 	log := logging.Logger("itn orchestrator")
 	log.Infof("Launching logging: %v", logging.GetSubsystems())
 	config := lib.SetupConfig(context.Background(), orchestratorConfig, log)
-	outCache := lib.EmptyOutputCache()
-	rconfig := lib.ResolutionConfig{
-		OutputCache: outCache,
-	}
 	inDecoder := json.NewDecoder(os.Stdin)
-	step := 0
-	var prevAction lib.BatchAction
-	var actionAccum []lib.ActionIO
-	handlePrevAction := func() error {
-		log.Infof("Performing steps %s (%d-%d)", prevAction.Name(), step, len(actionAccum)-step)
-		err := prevAction.RunMany(config, actionAccum)
-		if err != nil {
-			return &lib.OrchestratorError{
-				Message: fmt.Sprintf("Error running steps %d-%d: %v", step, len(actionAccum)-step, err),
-				Code:    9,
-			}
-		}
-		prevAction = nil
-		actionAccum = nil
-		return nil
-	}
-
-	lib.RunActions(inDecoder, config, outCache, log, step,
-		handlePrevAction, &actionAccum, rconfig, &prevAction)
-	if prevAction != nil {
-		if err := handlePrevAction(); err != nil {
-			return &lib.OrchestratorError{
-				Message: fmt.Sprintf("Error running previous action: %v", err),
-				Code:    9,
-			}
-		}
-	}
-	return nil
+	
+	return lib.RunExperiment(inDecoder, config, log)
 }
 
 func main() {

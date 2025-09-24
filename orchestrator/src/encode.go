@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	logging "github.com/ipfs/go-log/v2"
 )
 
 func fund(p FundParams) GeneratedCommand {
@@ -17,7 +19,7 @@ func fund(p FundParams) GeneratedCommand {
 func EncodeToWriter(p *GenParams, writer io.Writer) error {
 	encoder := json.NewEncoder(writer)
 	var errors []string
-	
+
 	writeComment := func(comment string) {
 		if err := encoder.Encode(comment); err != nil {
 			errors = append(errors, fmt.Sprintf("Error writing comment: %v", err))
@@ -31,11 +33,62 @@ func EncodeToWriter(p *GenParams, writer io.Writer) error {
 			errors = append(errors, fmt.Sprintf("Error writing command: %v", err))
 		}
 	}
-	
+
 	Encode(p, writeCommand, writeComment)
-	
+
 	if len(errors) > 0 {
 		return fmt.Errorf("encoding errors: %s", strings.Join(errors, "; "))
+	}
+	return nil
+}
+
+// RunExperiment executes an experiment from a JSON decoder with the given configuration
+// Returns error if execution fails, nil on success
+func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardLogger) error {
+	outCache := EmptyOutputCache()
+	rconfig := ResolutionConfig{
+		OutputCache: outCache,
+	}
+	step := 0
+	var prevAction BatchAction
+	var actionAccum []ActionIO
+
+	handlePrevAction := func() error {
+		log.Infof("Performing steps %s (%d-%d)", prevAction.Name(), step-len(actionAccum), step-1)
+		err := prevAction.RunMany(config, actionAccum)
+		if err != nil {
+			return &OrchestratorError{
+				Message: fmt.Sprintf("Error running steps %d-%d: %v", step-len(actionAccum), step-1, err),
+				Code:    9,
+			}
+		}
+		prevAction = nil
+		actionAccum = nil
+		return nil
+	}
+
+	err := RunActions(inDecoder, config, outCache, log, step,
+		handlePrevAction, &actionAccum, rconfig, &prevAction)
+	if err != nil {
+		if orchErr, ok := err.(*OrchestratorError); ok {
+			log.Errorf("Experiment finished with error: %v", orchErr)
+			return orchErr
+		}
+		return err
+	}
+
+	if prevAction != nil {
+		if err := handlePrevAction(); err != nil {
+			log.Errorf("Error running action: %s due to: %v", prevAction.Name(), err)
+			// Check if context is canceled
+			if config.Ctx.Err() != nil {
+				return config.Ctx.Err()
+			}
+			return &OrchestratorError{
+				Message: fmt.Sprintf("Error running previous action: %v", err),
+				Code:    9,
+			}
+		}
 	}
 	return nil
 }

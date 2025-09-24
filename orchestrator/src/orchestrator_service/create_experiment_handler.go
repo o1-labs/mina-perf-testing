@@ -26,23 +26,27 @@ type CreateExperimentHandler struct {
 // This function creates a new experiment based on the provided setup parameters,
 // validates the input, generates the experiment configuration, and starts the experiment execution.
 // Returns (statusCode, errors) where statusCode indicates the type of response.
-func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputData) (int, []string) {
+func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputData) (int, []string, string) {
 	var p lib.GenParams
 	setup.ApplyWithDefaults(&p)
 
 	validationErrors := lib.ValidateAndCollectErrors(&p)
 	if len(validationErrors) > 0 {
-		return http.StatusBadRequest, validationErrors
+		return http.StatusBadRequest, validationErrors, ""
 	}
 
-	var result strings.Builder
-	if err := lib.EncodeToWriter(&p, &result); err != nil {
-		return http.StatusInternalServerError, []string{err.Error()}
+	var experimentScript string
+	{
+		var result strings.Builder
+		if err := lib.EncodeToWriter(&p, &result); err != nil {
+			return http.StatusInternalServerError, []string{err.Error()}, ""
+		}
+		experimentScript = result.String()
 	}
 
 	setup_json, err := p.ToJSON()
 	if err != nil {
-		return http.StatusInternalServerError, []string{fmt.Sprintf("Error converting to JSON: %v", err)}
+		return http.StatusInternalServerError, []string{fmt.Sprintf("Error converting to JSON: %v", err)}, ""
 	}
 
 	job := &service.ExperimentState{
@@ -59,17 +63,17 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 	config := lib.SetupConfig(ctx, orchestratorConfig, log)
 
 	if err := h.Store.Add(job, cancel); err != nil {
-		return http.StatusConflict, []string{fmt.Sprintf("failed to add experiment: %v", err)}
+		return http.StatusConflict, []string{fmt.Sprintf("failed to add experiment: %v", err)}, ""
 	}
 
 	if err := h.Store.WriteExperimentToDB(*job); err != nil {
-		return http.StatusInternalServerError, []string{fmt.Sprintf("failed to write experiment to database: %v", err)}
+		return http.StatusInternalServerError, []string{fmt.Sprintf("failed to write experiment to database: %v", err)}, ""
 	}
 
-	decoder := json.NewDecoder(strings.NewReader(result.String()))
+	decoder := json.NewDecoder(strings.NewReader(experimentScript))
 	go h.App.loadRun(decoder, config, log)
 
-	return http.StatusOK, []string{}
+	return http.StatusOK, []string{}, experimentScript
 }
 
 // ServeHTTP implements the http.Handler interface
@@ -90,13 +94,13 @@ func (h *CreateExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	statusCode, errors := h.Handle(experimentSetup)
+	statusCode, errors, experimentScript := h.Handle(experimentSetup)
 
 	// Determine result based on status code
 	var result string
 	switch statusCode {
 	case http.StatusOK:
-		result = "success"
+		result = experimentScript
 	case http.StatusBadRequest:
 		// Check if it's validation errors (from Handle method)
 		if len(errors) > 0 {
