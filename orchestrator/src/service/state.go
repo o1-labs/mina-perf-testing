@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	lib "itn_orchestrator"
 	"log"
@@ -35,7 +36,7 @@ type ExperimentState struct {
 	Comment         *string          `json:"comment,omitempty"`
 	CurrentStepNo   int              `json:"step"`
 	CurrentStepName string           `json:"step_name"`
-	Setup           lib.GenParams    `gorm:"column:setup_json;serializer:json" json:"setup_json"`
+	Setup           lib.GenParams    `gorm:"column:setup_json;type:jsonb" json:"setup_json"`
 	Warnings        pq.StringArray   `gorm:"type:text[]" json:"warnings,omitempty"`
 	Errors          pq.StringArray   `gorm:"type:text[]" json:"errors,omitempty"`
 	Logs            pq.StringArray   `gorm:"type:text[]" json:"logs,omitempty"`
@@ -87,12 +88,18 @@ func (a *Store) WriteExperimentToDB(state ExperimentState) error {
 }
 
 func (a *Store) updateExperimentInDB(state *ExperimentState) error {
+	// Convert Setup to JSON bytes to avoid GORM serialization issues
+	setupJSON, err := json.Marshal(state.Setup)
+	if err != nil {
+		log.Printf("Error marshaling setup JSON: %v", err)
+		return err
+	}
 
-	err := a.DB.Model(&ExperimentState{}).Where("name = ?", state.Name).Updates(map[string]interface{}{
+	err = a.DB.Model(&ExperimentState{}).Where("name = ?", state.Name).Updates(map[string]interface{}{
 		"updated_at":        state.UpdatedAt,
 		"ended_at":          state.EndedAt,
 		"status":            state.Status,
-		"setup_json":        state.Setup,
+		"setup_json":        string(setupJSON),
 		"current_step_no":   state.CurrentStepNo,
 		"current_step_name": state.CurrentStepName,
 		"warnings":          state.Warnings,
