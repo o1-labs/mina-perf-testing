@@ -72,6 +72,7 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 	step := 0
 	var prevAction BatchAction
 	var actionAccum []ActionIO
+	var batchStartStep int // Track the starting step of current batch
 	var preBatchComments []string  // Comments to print before current batch executes
 	var postBatchComments []string // Comments accumulated after batch started
 
@@ -82,12 +83,26 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 		}
 		preBatchComments = nil
 
-		log.Infof("Performing steps %s (%d-%d)", prevAction.Name(), step-len(actionAccum), step-1)
+		// Calculate correct step range for the batch
+		batchEndStep := batchStartStep + len(actionAccum) - 1
+		if len(actionAccum) == 1 {
+			log.Infof("Performing step %s (%d)", prevAction.Name(), batchStartStep)
+		} else {
+			log.Infof("Performing steps %s (%d-%d)", prevAction.Name(), batchStartStep, batchEndStep)
+		}
 		err := prevAction.RunMany(config, actionAccum)
 		if err != nil {
-			return &OrchestratorError{
-				Message: fmt.Sprintf("Error running steps %d-%d: %v", step-len(actionAccum), step-1, err),
-				Code:    9,
+			batchEndStep := batchStartStep + len(actionAccum) - 1
+			if len(actionAccum) == 1 {
+				return &OrchestratorError{
+					Message: fmt.Sprintf("Error running step %d: %v", batchStartStep, err),
+					Code:    9,
+				}
+			} else {
+				return &OrchestratorError{
+					Message: fmt.Sprintf("Error running steps %d-%d: %v", batchStartStep, batchEndStep, err),
+					Code:    9,
+				}
 			}
 		}
 		prevAction = nil
@@ -100,7 +115,7 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 	}
 
 	err := RunActions(inDecoder, config, outCache, log, step,
-		handlePrevAction, &actionAccum, rconfig, &prevAction, &preBatchComments, &postBatchComments)
+		handlePrevAction, &actionAccum, rconfig, &prevAction, &preBatchComments, &postBatchComments, &batchStartStep)
 	if err != nil {
 		if orchErr, ok := err.(*OrchestratorError); ok {
 			log.Errorf("Experiment finished with error: %v", orchErr)

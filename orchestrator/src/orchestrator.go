@@ -246,7 +246,7 @@ func EmptyOutputCache() outCacheT {
 }
 
 func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log logging.StandardLogger, step int,
-	handlePrevAction func() error, actionAccum *[]ActionIO, rconfig ResolutionConfig, prevAction *BatchAction, preBatchComments *[]string, postBatchComments *[]string) error {
+	handlePrevAction func() error, actionAccum *[]ActionIO, rconfig ResolutionConfig, prevAction *BatchAction, preBatchComments *[]string, postBatchComments *[]string, batchStartStep *int) error {
 	for {
 
 		select {
@@ -303,6 +303,10 @@ func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log 
 					Message: fmt.Sprintf("Error validating action '%s' for step %d: %v", cmd.Action, step, err),
 					Code:    1,
 				}
+			}
+			// If this is the start of a new batch, record the starting step
+			if len(*actionAccum) == 0 {
+				*batchStartStep = step
 			}
 			*prevAction = batchAction
 			*actionAccum = append(*actionAccum, ActionIO{
