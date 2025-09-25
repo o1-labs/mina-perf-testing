@@ -36,7 +36,7 @@ func (h *InfoExperimentHandler) Handle(setup *service_inputs.GeneratorInputData)
 
 	// Get experiment info directly from EncodeToWriter
 	var result strings.Builder
-	experimentInfo, err := lib.EncodeToWriter(&p, &result, true)
+	experimentInfo, err := lib.EncodeToWriter(&p, &result, setup)
 	if err != nil {
 		return nil, fmt.Errorf("encoding errors: %v", err)
 	}
