@@ -246,7 +246,7 @@ func EmptyOutputCache() outCacheT {
 }
 
 func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log logging.StandardLogger, step int,
-	handlePrevAction func() error, actionAccum *[]ActionIO, rconfig ResolutionConfig, prevAction *BatchAction) error {
+	handlePrevAction func() error, actionAccum *[]ActionIO, rconfig ResolutionConfig, prevAction *BatchAction, preBatchComments *[]string, postBatchComments *[]string) error {
 	for {
 
 		select {
@@ -267,8 +267,14 @@ func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log 
 			break
 		}
 		if commandOrComment.command == nil {
-			log.Info(commandOrComment.comment)
-			fmt.Fprintln(os.Stderr, commandOrComment.comment)
+			// Accumulate comments based on current state
+			if *prevAction == nil {
+				// No current batch - these comments go to pre-batch
+				*preBatchComments = append(*preBatchComments, commandOrComment.comment)
+			} else {
+				// Current batch exists - these comments go to post-batch
+				*postBatchComments = append(*postBatchComments, commandOrComment.comment)
+			}
 			continue
 		}
 		cmd := *commandOrComment.command
@@ -304,6 +310,12 @@ func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log 
 				Output: outputF(outCache, log, step),
 			})
 		} else {
+			// Print accumulated comments before executing immediate action
+			for _, comment := range *preBatchComments {
+				printComment(comment, log)
+			}
+			*preBatchComments = nil
+
 			log.Infof("Performing step %s (%d)", cmd.Action, step)
 			err = action.Run(config, params, outputF(outCache, log, step))
 			if err != nil {

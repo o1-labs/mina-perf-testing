@@ -56,6 +56,12 @@ func EncodeToWriter(p *GenParams, writer io.Writer, isService bool) (ExperimentI
 	return experimentInfo, nil
 }
 
+// printComment prints a comment to both log and stderr
+func printComment(comment string, log logging.StandardLogger) {
+	log.Info(comment)
+	fmt.Fprintln(os.Stderr, comment)
+}
+
 // RunExperiment executes an experiment from a JSON decoder with the given configuration
 // Returns error if execution fails, nil on success
 func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardLogger) error {
@@ -66,8 +72,16 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 	step := 0
 	var prevAction BatchAction
 	var actionAccum []ActionIO
+	var preBatchComments []string  // Comments to print before current batch executes
+	var postBatchComments []string // Comments accumulated after batch started
 
 	handlePrevAction := func() error {
+		// Print pre-batch comments before executing the action
+		for _, comment := range preBatchComments {
+			printComment(comment, log)
+		}
+		preBatchComments = nil
+
 		log.Infof("Performing steps %s (%d-%d)", prevAction.Name(), step-len(actionAccum), step-1)
 		err := prevAction.RunMany(config, actionAccum)
 		if err != nil {
@@ -78,11 +92,15 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 		}
 		prevAction = nil
 		actionAccum = nil
+
+		// Move post-batch comments to pre-batch for next action
+		preBatchComments = postBatchComments
+		postBatchComments = nil
 		return nil
 	}
 
 	err := RunActions(inDecoder, config, outCache, log, step,
-		handlePrevAction, &actionAccum, rconfig, &prevAction)
+		handlePrevAction, &actionAccum, rconfig, &prevAction, &preBatchComments, &postBatchComments)
 	if err != nil {
 		if orchErr, ok := err.(*OrchestratorError); ok {
 			log.Errorf("Experiment finished with error: %v", orchErr)
@@ -103,6 +121,14 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 				Code:    9,
 			}
 		}
+	}
+
+	// Print any remaining accumulated comments at the end
+	for _, comment := range preBatchComments {
+		printComment(comment, log)
+	}
+	for _, comment := range postBatchComments {
+		printComment(comment, log)
 	}
 	return nil
 }
