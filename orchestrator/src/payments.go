@@ -69,6 +69,10 @@ func schedulePaymentsDo(config Config, params PaymentSubParams, nodeAddress Node
 
 func SchedulePayments(config Config, params PaymentParams, output func(ScheduledPaymentsReceipt)) error {
 	tps, nodes := selectNodes(params.Tps, params.MinTps, params.Nodes)
+	if len(nodes) == 0 {
+		return fmt.Errorf("no nodes selected for payment execution (tps=%.6f, minTps=%.6f, available nodes=%d)", 
+			params.Tps, params.MinTps, len(params.Nodes))
+	}
 	feePayersPerNode := len(params.FeePayers) / len(nodes)
 	successfulNodes := make([]NodeAddress, 0, len(nodes))
 	remTps := params.Tps

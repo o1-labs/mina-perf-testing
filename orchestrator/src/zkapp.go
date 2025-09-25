@@ -130,6 +130,10 @@ func SendZkappCommands(config Config, params ZkappCommandParams, output func(Sch
 		return errors.New("no nodes specified")
 	}
 	tps, nodes := selectNodes(params.Tps, params.MinTps, params.Nodes)
+	if len(nodes) == 0 {
+		return fmt.Errorf("no nodes selected for zkapp execution (tps=%.6f, minTps=%.6f, available nodes=%d)", 
+			params.Tps, params.MinTps, len(params.Nodes))
+	}
 	feePayersPerNode := len(params.FeePayers) / len(nodes)
 	successfulNodes := make([]NodeAddress, 0, len(nodes))
 	remTps := params.Tps
