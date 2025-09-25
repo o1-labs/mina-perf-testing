@@ -35,7 +35,7 @@ type ExperimentState struct {
 	Comment         *string          `json:"comment,omitempty"`
 	CurrentStepNo   int              `json:"step"`
 	CurrentStepName string           `json:"step_name"`
-	Setup           lib.GenParams    `gorm:"serializer:json" json:"setup_json"`
+	Setup           lib.GenParams    `gorm:"column:setup_json;serializer:json" json:"setup_json"`
 	Warnings        pq.StringArray   `gorm:"type:text[]" json:"warnings,omitempty"`
 	Errors          pq.StringArray   `gorm:"type:text[]" json:"errors,omitempty"`
 	Logs            pq.StringArray   `gorm:"type:text[]" json:"logs,omitempty"`
