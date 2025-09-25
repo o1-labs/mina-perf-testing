@@ -40,7 +40,7 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 	{
 		var result strings.Builder
 		var err error
-		if experimentInfo, err = lib.EncodeToWriter(&p, &result, true); err != nil {
+		if experimentInfo, err = lib.EncodeToWriter(&p, &result, setup); err != nil {
 			return http.StatusInternalServerError, []string{err.Error()}, nil
 		}
 		experimentScript = result.String()
