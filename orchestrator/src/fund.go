@@ -74,7 +74,16 @@ func fundImpl(config Config, ctx context.Context, daemonPort string, params Fund
 }
 
 func fundRunImpl(config Config, ctx context.Context, daemonPortIx int, params FundParams, output OutputF) error {
+	// The amount per key should be the total amount divided by number of accounts
+	// But we need to ensure each account gets enough to cover the fee
 	amountPerKey := params.Amount / uint64(params.Num)
+	
+	// Check if the amount per key is sufficient to cover the fee
+	if amountPerKey < params.Fee {
+		return fmt.Errorf("insufficient funds per account: each account would get %d nanomina but fee is %d nanomina (need at least %d nanomina total for %d accounts)", 
+			amountPerKey, params.Fee, params.Fee*uint64(params.Num), params.Num)
+	}
+	
 	password := ""
 	if params.PasswordEnv != "" {
 		password, _ = os.LookupEnv(params.PasswordEnv)

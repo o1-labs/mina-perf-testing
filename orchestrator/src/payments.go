@@ -36,6 +36,12 @@ func PaymentKeygenRequirements(gap int, params PaymentSubParams) (int, uint64) {
 	totalTxs := uint64(math.Ceil(float64(params.DurationMin) * 60 * params.Tps))
 	balance := 3 * txCost * totalTxs
 	keys := maxParticipants + int(tpsGap)*2
+	
+	// Add funding fees for account creation (1 MINA per account by default)
+	// This ensures we have enough funds to cover both the account balances AND the creation fees
+	fundingFees := uint64(keys) * 1e9 // 1 MINA per account creation
+	balance += fundingFees
+	
 	return keys, balance
 }
 
