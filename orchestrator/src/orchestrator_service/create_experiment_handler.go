@@ -46,11 +46,17 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 		experimentScript = result.String()
 	}
 
+	var webhookURL string
+	if setup.WebhookURL != nil {
+		webhookURL = *setup.WebhookURL
+	}
+
 	job := &service.ExperimentState{
-		Name:      *setup.ExperimentName,
-		Status:    "running",
-		CreatedAt: time.Now(),
-		Setup:     p,
+		Name:       *setup.ExperimentName,
+		Status:     "running",
+		CreatedAt:  time.Now(),
+		Setup:      p,
+		WebhookURL: webhookURL,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

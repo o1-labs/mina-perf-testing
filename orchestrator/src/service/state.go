@@ -39,6 +39,7 @@ type ExperimentState struct {
 	Warnings        pq.StringArray   `gorm:"type:text[]" json:"warnings,omitempty"`
 	Errors          pq.StringArray   `gorm:"type:text[]" json:"errors,omitempty"`
 	Logs            pq.StringArray   `gorm:"type:text[]" json:"logs,omitempty"`
+	WebhookURL      string           `json:"webhook_url,omitempty"`
 }
 
 func (ExperimentState) TableName() string {
@@ -97,6 +98,7 @@ func (a *Store) updateExperimentInDB(state *ExperimentState) error {
 		"warnings":          state.Warnings,
 		"errors":            state.Errors,
 		"logs":              state.Logs,
+		"webhook_url":       state.WebhookURL,
 	}).Error
 	if err != nil {
 		log.Printf("Error updating experiment in DB: %v", err)
@@ -106,7 +108,7 @@ func (a *Store) updateExperimentInDB(state *ExperimentState) error {
 
 }
 
-func (s *Store) AtomicSet(f func(experiment *ExperimentState)) {
+func (s *Store) AtomicSet(f func(experiment *ExperimentState)) *ExperimentState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.experiment != nil {
@@ -122,6 +124,7 @@ func (s *Store) AtomicSet(f func(experiment *ExperimentState)) {
 			log.Printf("Error updating experiment in DB: %v", err)
 		}
 	}
+	return s.experiment
 }
 
 func (s *Store) AtomicGet() *ExperimentState {
@@ -134,8 +137,8 @@ func (s *Store) AtomicGet() *ExperimentState {
 }
 
 // FinishWithError sets the experiment status to "error" and appends the error message
-func (s *Store) FinishWithError(err *lib.OrchestratorError) {
-	s.AtomicSet(func(experiment *ExperimentState) {
+func (s *Store) FinishWithError(err *lib.OrchestratorError) *ExperimentState {
+	return s.AtomicSet(func(experiment *ExperimentState) {
 		experiment.Status = "error"
 		experiment.Errors = append(experiment.Errors, err.Message)
 		experiment.EndedAt = &time.Time{}
@@ -143,8 +146,8 @@ func (s *Store) FinishWithError(err *lib.OrchestratorError) {
 }
 
 // FinishWithSuccess sets the experiment status to "success" and marks it as completed
-func (s *Store) FinishWithSuccess() {
-	s.AtomicSet(func(experiment *ExperimentState) {
+func (s *Store) FinishWithSuccess() *ExperimentState {
+	return s.AtomicSet(func(experiment *ExperimentState) {
 		experiment.Status = "success"
 		experiment.EndedAt = &time.Time{}
 	})

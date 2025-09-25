@@ -43,6 +43,7 @@ type GeneratorInputData struct {
 	MaxBalanceChange       *uint64                       `json:"max_balance_change,omitempty"`
 	MinBalanceChange       *uint64                       `json:"min_balance_change,omitempty"`
 	PaymentAmount          *uint64                       `json:"payment_amount,omitempty"`
+	WebhookURL             *string                       `json:"webhook_url,omitempty"`
 	Privkeys               []string                      `json:"priv_keys,omitempty"`
 	Fees                   struct {
 		Deployment *uint64 `json:"deployment,omitempty"`

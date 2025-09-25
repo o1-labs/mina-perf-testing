@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,9 +22,10 @@ import (
 
 // App holds application-wide dependencies
 type App struct {
-	Router *mux.Router
-	Store  *service.Store
-	Config *lib.OrchestratorConfig
+	Router          *mux.Router
+	Store           *service.Store
+	Config          *lib.OrchestratorConfig
+	WebhookNotifier *WebhookNotifier
 }
 
 func (a *App) initializeRoutes() {
@@ -69,6 +71,7 @@ func (a *App) Initialize(connStr string, config lib.OrchestratorConfig) {
 	a.Router = mux.NewRouter()
 	a.Store = service.NewStore(db)
 	a.Config = &config
+	a.WebhookNotifier = NewWebhookNotifier(logging.Logger("webhook"))
 	a.initializeRoutes()
 }
 
@@ -83,20 +86,37 @@ func (a *App) Run(address string) {
 }
 
 func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.StandardLogger) {
-	err := lib.RunExperiment(inDecoder, config, log)
-	if err != nil {
-		if orchErr, ok := err.(*lib.OrchestratorError); ok {
-			a.Store.FinishWithError(orchErr)
-		} else {
-			// Convert other errors to OrchestratorError
-			a.Store.FinishWithError(&lib.OrchestratorError{
-				Message: fmt.Sprintf("Experiment failed: %v", err),
+	if err := lib.RunExperiment(inDecoder, config, log); err != nil {
+		var orchErr *lib.OrchestratorError
+		var ok bool
+		if orchErr, ok = err.(*lib.OrchestratorError); !ok {
+			errMsg := fmt.Sprintf("Experiment failed: %v", err)
+			orchErr = &lib.OrchestratorError{
+				Message: errMsg,
 				Code:    9,
-			})
+			}
+		}
+		if experiment := a.Store.FinishWithError(orchErr); experiment.WebhookURL != "" {
+			// Send error webhook notification
+			go a.WebhookNotifier.SendErrorNotification(
+				context.Background(),
+				experiment.WebhookURL,
+				experiment.Name,
+				orchErr.Message,
+				experiment.Warnings,
+			)
 		}
 		return
 	}
-	a.Store.FinishWithSuccess()
+	if experiment := a.Store.FinishWithSuccess(); experiment.WebhookURL != "" {
+		// Send success webhook notification
+		go a.WebhookNotifier.SendSuccessNotification(
+			context.Background(),
+			experiment.WebhookURL,
+			experiment.Name,
+			experiment.Warnings,
+		)
+	}
 }
 
 func main() {
