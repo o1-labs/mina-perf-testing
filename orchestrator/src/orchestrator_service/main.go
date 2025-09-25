@@ -67,7 +67,7 @@ func (a *App) Initialize(connStr string, config lib.OrchestratorConfig) {
 		log.Fatalf("Cannot connect to DB: %v", err)
 	}
 	a.Router = mux.NewRouter()
-	a.Store = &service.Store{DB: db}
+	a.Store = service.NewStore(db)
 	a.Config = &config
 	a.initializeRoutes()
 }

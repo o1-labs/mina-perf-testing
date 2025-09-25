@@ -10,13 +10,26 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 )
 
+// RoundInfo holds information about a single round
+type RoundInfo struct {
+	PaymentCount    int     `json:"payment_count"`
+	ZkappCount      int     `json:"zkapp_count"`
+	PaymentTps      float64 `json:"payment_tps"`
+	ZkappTps        float64 `json:"zkapp_tps"`
+	DurationMinutes int     `json:"duration_minutes"`
+	MaxCost         bool    `json:"max_cost"`
+}
+
+// ExperimentInfo holds information about the entire experiment
+type ExperimentInfo []RoundInfo
+
 func fund(p FundParams) GeneratedCommand {
 	return GeneratedCommand{Action: FundAction{}.Name(), Params: p}
 }
 
 // EncodeToWriter encodes experiment parameters to a writer using JSON encoding
-// Returns error instead of calling os.Exit for better error handling
-func EncodeToWriter(p *GenParams, writer io.Writer) error {
+// Returns experiment info and error
+func EncodeToWriter(p *GenParams, writer io.Writer) (ExperimentInfo, error) {
 	encoder := json.NewEncoder(writer)
 	var errors []string
 
@@ -34,12 +47,18 @@ func EncodeToWriter(p *GenParams, writer io.Writer) error {
 		}
 	}
 
-	Encode(p, writeCommand, writeComment)
+	experimentInfo := Encode(p, writeCommand, writeComment)
 
 	if len(errors) > 0 {
-		return fmt.Errorf("encoding errors: %s", strings.Join(errors, "; "))
+		return ExperimentInfo{}, fmt.Errorf("encoding errors: %s", strings.Join(errors, "; "))
 	}
-	return nil
+	return experimentInfo, nil
+}
+
+// EncodeToWriterWithInfo encodes experiment parameters to a writer and returns round information
+// This is now just an alias for EncodeToWriter since it returns both
+func EncodeToWriterWithInfo(p *GenParams, writer io.Writer) (ExperimentInfo, error) {
+	return EncodeToWriter(p, writer)
 }
 
 // RunExperiment executes an experiment from a JSON decoder with the given configuration
@@ -93,7 +112,7 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 	return nil
 }
 
-func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func(string)) {
+func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func(string)) ExperimentInfo {
 
 	writeComment("Generated with: " + strings.Join(os.Args, " "))
 	if p.ZkappSoftLimit > -2 {
@@ -103,6 +122,8 @@ func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func
 	}
 	cmds := []GeneratedCommand{}
 	fundCmds := []FundParams{}
+	var rounds []RoundInfo
+
 	writeComment("Funding keys for the experiment")
 	for r := 0; r < p.Rounds; r++ {
 		round := p.Generate(r)
@@ -113,6 +134,8 @@ func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func
 		if round.ZkappFundCommand != nil {
 			fundCmds = append(fundCmds, *round.ZkappFundCommand)
 		}
+		// Collect round info from the generated round
+		rounds = append(rounds, round.RoundInfo)
 	}
 	privkeys := p.Privkeys
 	if p.GenerateFundKeys > 0 {
@@ -157,4 +180,5 @@ func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func
 	for _, cmd := range cmds {
 		writeCommand(cmd)
 	}
+	return rounds
 }

@@ -25,10 +25,12 @@ func writeResponse(w http.ResponseWriter, statusCode int, resp APIResponse) {
 }
 
 // writeJSONResponse writes a JSON response with the given data (for non-APIResponse data)
-func writeJSONResponse(w http.ResponseWriter, data struct{ Result interface{} }) {
+func writeJSONResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
+	if err := json.NewEncoder(w).Encode(struct {
+		Result interface{} `json:"result,omitempty"`
+	}{Result: data}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

@@ -13,7 +13,6 @@ import (
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/lib/pq"
-	"gorm.io/datatypes"
 )
 
 type ExperimentStatus string
@@ -36,7 +35,7 @@ type ExperimentState struct {
 	Comment         *string          `json:"comment,omitempty"`
 	CurrentStepNo   int              `json:"step"`
 	CurrentStepName string           `json:"step_name"`
-	SetupJSON       datatypes.JSON   `json:"setup_json"`
+	Setup           lib.GenParams    `gorm:"serializer:json" json:"setup_json"`
 	Warnings        pq.StringArray   `gorm:"type:text[]" json:"warnings,omitempty"`
 	Errors          pq.StringArray   `gorm:"type:text[]" json:"errors,omitempty"`
 	Logs            pq.StringArray   `gorm:"type:text[]" json:"logs,omitempty"`
@@ -54,16 +53,24 @@ type Store struct {
 }
 
 func NewStore(db *gorm.DB) *Store {
+	// Auto-migrate the schema
+	log.Printf("Starting auto-migration for ExperimentState table...")
+	err := db.AutoMigrate(&ExperimentState{})
+	if err != nil {
+		log.Printf("Error auto-migrating ExperimentState table: %v", err)
+	} else {
+		log.Printf("Auto-migration completed successfully")
+	}
 	return &Store{
 		DB: db,
 	}
 }
 
-func (a *Store) CheckExperimentIsUnique(name string) bool {
+func (a *Store) NameIsUnique(name string) bool {
 	var count int64
 	err := a.DB.Where("name = ?", name).Model(&ExperimentState{}).Count(&count).Error
 	if err != nil {
-		log.Printf("Error checking experiment uniqueness: %v", err)
+		log.Printf("Error checking experiment uniqueness for name '%s': %v", name, err)
 		return false
 	}
 	return count == 0
@@ -84,7 +91,7 @@ func (a *Store) updateExperimentInDB(state *ExperimentState) error {
 		"updated_at":        state.UpdatedAt,
 		"ended_at":          state.EndedAt,
 		"status":            state.Status,
-		"setup_json":        state.SetupJSON,
+		"setup_json":        state.Setup,
 		"current_step_no":   state.CurrentStepNo,
 		"current_step_name": state.CurrentStepName,
 		"warnings":          state.Warnings,

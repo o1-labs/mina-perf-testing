@@ -33,5 +33,5 @@ func (h *StatusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSONResponse(w, struct{ Result interface{} }{Result: job})
+	writeJSONResponse(w, job)
 }

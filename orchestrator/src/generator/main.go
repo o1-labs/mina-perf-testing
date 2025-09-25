@@ -90,7 +90,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := lib.EncodeToWriter(&p, os.Stdout); err != nil {
+	if _, err := lib.EncodeToWriter(&p, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "Error encoding: %v\n", err)
 		os.Exit(3)
 	}

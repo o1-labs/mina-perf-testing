@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 
 	lib "itn_orchestrator"
@@ -19,15 +17,9 @@ type InfoExperimentHandler struct {
 
 // InfoExperimentResponse represents the response for experiment info endpoint
 type InfoExperimentResponse struct {
-	Setup  interface{} `json:"setup"`
-	Rounds []Round     `json:"rounds"`
-}
-
-// Round represents a single round in the experiment
-type Round struct {
-	No           int     `json:"no"`
-	PaymentsRate float64 `json:"payments_rate"`
-	ZkappRate    float64 `json:"zkapp_rate"`
+	Setup  lib.GenParams   `json:"setup"`
+	Rounds []lib.RoundInfo `json:"rounds"`
+	Script string          `json:"script"`
 }
 
 // Handle processes the experiment info request with well-typed input/output
@@ -42,63 +34,17 @@ func (h *InfoExperimentHandler) Handle(setup *service_inputs.GeneratorInputData)
 		return nil, fmt.Errorf("validation failed: %v", validationErrors)
 	}
 
-	var errors []string
-	var rounds []Round
+	// Get experiment info directly from EncodeToWriter
 	var result strings.Builder
-
-	if err := lib.EncodeToWriter(&p, &result); err != nil {
+	experimentInfo, err := lib.EncodeToWriter(&p, &result)
+	if err != nil {
 		return nil, fmt.Errorf("encoding errors: %v", err)
 	}
 
-	setup_json, err := p.ToJSON()
-	if err != nil {
-		return nil, fmt.Errorf("error converting to JSON: %v", err)
-	}
-
-	// Parse rounds information from the generated output
-	for _, line := range strings.Split(result.String(), "\n") {
-		re := regexp.MustCompile(`Starting round (\d), .*`)
-		if re.MatchString(line) {
-			m := re.FindStringSubmatch(line)
-			if len(m) == 2 {
-				roundNo, err := strconv.Atoi(m[1])
-				if err != nil {
-					errors = append(errors, fmt.Sprintf("Error parsing round number: %v", err))
-					continue
-				}
-				rounds = append(rounds, Round{
-					No: roundNo,
-				})
-			}
-		}
-
-		re = regexp.MustCompile(`\b\d+\s+(zkapp|payments)\b.*?\(([\d.]+)\s*txs\/min\)`)
-		if re.MatchString(line) {
-			m := re.FindStringSubmatch(line)
-			if len(m) == 3 && len(rounds) > 0 {
-				round := &rounds[len(rounds)-1]
-				rate, err := strconv.ParseFloat(m[2], 64)
-				if err != nil {
-					errors = append(errors, fmt.Sprintf("Error parsing rate: %v", err))
-					continue
-				}
-				switch m[1] {
-				case "zkapp":
-					round.ZkappRate = rate
-				case "payments":
-					round.PaymentsRate = rate
-				}
-			}
-		}
-	}
-
-	if len(errors) > 0 {
-		return nil, fmt.Errorf("parsing errors: %v", errors)
-	}
-
 	return &InfoExperimentResponse{
-		Setup:  setup_json,
-		Rounds: rounds,
+		Setup:  p,
+		Rounds: experimentInfo,
+		Script: result.String(),
 	}, nil
 }
 
@@ -112,9 +58,12 @@ func (h *InfoExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
-	if !h.Store.CheckExperimentIsUnique(*experimentSetup.ExperimentName) {
+
+	if expName := *experimentSetup.ExperimentName; !h.Store.NameIsUnique(expName) {
 		writeResponse(w, http.StatusBadRequest, APIResponse{
-			Errors: []string{"experiment with the same name already exists"},
+			Errors: []string{
+				fmt.Sprintf("experiment with name %s already exists", expName),
+			},
 			Result: "error",
 		})
 		return
@@ -142,5 +91,5 @@ func (h *InfoExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSONResponse(w, struct{ Result interface{} }{Result: response})
+	writeJSONResponse(w, response)
 }

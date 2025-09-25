@@ -24,7 +24,7 @@ func run(configFilename string) error {
 	log.Infof("Launching logging: %v", logging.GetSubsystems())
 	config := lib.SetupConfig(context.Background(), orchestratorConfig, log)
 	inDecoder := json.NewDecoder(os.Stdin)
-	
+
 	return lib.RunExperiment(inDecoder, config, log)
 }
 

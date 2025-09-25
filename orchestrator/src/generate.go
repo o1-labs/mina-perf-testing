@@ -9,8 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"gorm.io/datatypes"
 )
 
 type GenParams struct {
@@ -32,14 +30,6 @@ type GenParams struct {
 	PaymentAmount, MinZkappFee, MaxZkappFee, FundFee                     uint64
 	MinPaymentFee, MaxPaymentFee                                         uint64
 	ZkappSoftLimit                                                       int
-}
-
-func (p *GenParams) ToJSON() (datatypes.JSON, error) {
-	data, err := json.Marshal(p)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to marshal setup to JSON: %v", err)
-	}
-	return data, nil
 }
 
 func DefaultGenParams() GenParams {
@@ -103,6 +93,7 @@ type GeneratedRound struct {
 	Commands           []GeneratedCommand
 	PaymentFundCommand *FundParams
 	ZkappFundCommand   *FundParams
+	RoundInfo          RoundInfo
 }
 
 func withComment(comment string, cmd GeneratedCommand) GeneratedCommand {
@@ -312,6 +303,33 @@ func except(groupRef int, groupName string, exceptRef int, exceptName string) Ge
 		Except: except,
 	}}
 }
+
+func roundInfo(paymentParams PaymentSubParams, zkappParams ZkappSubParams, onlyPayments bool, onlyZkapps bool, roundDurationMin int) RoundInfo {
+	// Calculate round information
+	var paymentCount, zkappCount int
+	var paymentTps, zkappTps_ float64
+	var maxCost_ bool
+
+	if !onlyZkapps {
+		paymentCount = int(paymentParams.Tps * float64(paymentParams.DurationMin) * 60)
+		paymentTps = paymentParams.Tps
+	}
+	if !onlyPayments {
+		zkappCount = int(zkappParams.Tps * float64(zkappParams.DurationMin) * 60)
+		zkappTps_ = zkappParams.Tps
+		maxCost_ = zkappParams.MaxCost
+	}
+
+	return RoundInfo{
+		PaymentCount:    paymentCount,
+		ZkappCount:      zkappCount,
+		PaymentTps:      paymentTps,
+		ZkappTps:        zkappTps_,
+		DurationMinutes: roundDurationMin,
+		MaxCost:         maxCost_,
+	}
+}
+
 func (p *GenParams) Generate(round int) GeneratedRound {
 	zkappsKeysDir := fmt.Sprintf("%s/%s/round-%d/zkapps", p.FundKeyPrefix, p.ExperimentName, round)
 	paymentsKeysDir := fmt.Sprintf("%s/%s/round-%d/payments", p.FundKeyPrefix, p.ExperimentName, round)
@@ -470,7 +488,8 @@ func (p *GenParams) Generate(round int) GeneratedRound {
 			cmds = append(cmds, withComment(comment3, waitMin(p.LargePauseMin)))
 		}
 	}
-	res := GeneratedRound{Commands: cmds}
+
+	res := GeneratedRound{Commands: cmds, RoundInfo: roundInfo(paymentParams, zkappParams, onlyPayments, onlyZkapps, p.RoundDurationMin)}
 	if !onlyPayments {
 		_, _, _, initBalance := ZkappBalanceRequirements(zkappTps, zkappParams)
 		zkappKeysNum, zkappAmount := ZkappKeygenRequirements(initBalance, zkappParams)
