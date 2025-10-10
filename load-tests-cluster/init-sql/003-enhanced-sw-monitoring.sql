@@ -25,6 +25,80 @@ WHEN (
     )
 ) EXECUTE FUNCTION block_trace_update_started_at_trigger();
 
+-- Extend pool_action_t enum to include snark work specific actions
+ALTER TYPE pool_action_t ADD VALUE IF NOT EXISTS 'added';
+ALTER TYPE pool_action_t ADD VALUE IF NOT EXISTS 'scheduled';
+ALTER TYPE pool_action_t ADD VALUE IF NOT EXISTS 'removed';
+
+-- Update gossip_traces_trigger to handle all snark work events
+CREATE OR REPLACE FUNCTION gossip_traces_trigger() RETURNS trigger AS $$ 
+DECLARE 
+  nresource resource_t;
+  naction pool_action_t;
+  nstarted_at timestamptz;
+BEGIN 
+  NEW.gossip := TRUE;
+  nstarted_at := to_timestamp(new.started_at);
+
+  IF new.name IN (
+    'Snark_work_received',
+    'Snark_work_rejected',
+    'Snark_work_accepted',
+    'Snark_work_added',
+    'Snark_work_scheduled',
+    'Snark_work_removed'
+  ) THEN 
+    nresource := 'Snark_work';
+    naction := SUBSTRING(new.name FROM 12)::pool_action_t;
+  ELSE 
+    nresource := 'Transaction_diff';
+    naction := SUBSTRING(new.name FROM 18)::pool_action_t;
+  END IF;
+
+  INSERT INTO last_block_trace_gossip_checkpoint (
+    block_trace_id, 
+    resource, 
+    action, 
+    started_at
+  ) VALUES (
+    new.block_trace_id,
+    nresource,
+    naction,
+    nstarted_at
+  ) ON CONFLICT ON CONSTRAINT last_block_trace_gossip_checkpoint_pkey DO UPDATE SET
+    action = naction,
+    started_at = nstarted_at;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE 'plpgsql';
+
+-- Update gossip_traces_on_add trigger to handle all snark work events
+DROP TRIGGER IF EXISTS gossip_traces_on_add ON block_trace_checkpoint;
+CREATE TRIGGER gossip_traces_on_add BEFORE INSERT ON block_trace_checkpoint
+FOR EACH ROW
+WHEN (
+    new.main_trace
+    AND NOT new.is_control
+    AND new.source = 'M'
+    AND new.name IN (
+        'Snark_work_received',
+        'Snark_work_rejected',
+        'Snark_work_accepted',
+        'Snark_work_added',
+        'Snark_work_scheduled',
+        'Snark_work_removed',
+        'Transaction_diff_received',
+        'Transaction_diff_rejected',
+        'Transaction_diff_accepted'
+    )
+) EXECUTE FUNCTION gossip_traces_trigger();
+
+-- Fix NOT NULL constraints that are too strict for optional metadata fields
+ALTER TABLE sw_traces
+  ALTER COLUMN fee DROP NOT NULL,
+  ALTER COLUMN prover DROP NOT NULL;
+
 -- Add transaction information columns to sw_traces table
 ALTER TABLE sw_traces
   ADD COLUMN IF NOT EXISTS fst_work_type VARCHAR(64),
@@ -37,7 +111,7 @@ ALTER TABLE sw_traces
 -- Update sw_traces_add function to populate transaction information from metadata's txs field
 CREATE OR REPLACE FUNCTION sw_traces_add(id bigint, block_trace_id_ int4, metadata jsonb) 
 RETURNS SETOF sw_traces AS $$ 
-BEGIN 
+BEGIN
   RETURN QUERY
   INSERT INTO sw_traces (
     block_trace_checkpoint_id,
@@ -79,7 +153,7 @@ BEGIN
       FROM
         last_block_trace_gossip_checkpoint p
         JOIN block_trace b ON b.block_trace_id = p.block_trace_id
-      WHERE
+    WHERE
         p.block_trace_id = block_trace_id_
         AND p.resource = 'Snark_work') AS sub
   ) RETURNING *;
