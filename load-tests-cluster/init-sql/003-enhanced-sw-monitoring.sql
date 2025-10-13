@@ -239,6 +239,49 @@ CREATE TRIGGER sw_traces_handle_sws AFTER INSERT ON sw_traces
 FOR EACH ROW
 EXECUTE FUNCTION uniq_sws_trigger();
 
+-- Table to track snark work interruptions from block metadata
+CREATE TABLE IF NOT EXISTS sw_interruptions (
+  block_trace_id INT NOT NULL PRIMARY KEY,
+  deployment_id INT NOT NULL,
+  time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  at INT NOT NULL,
+  reason TEXT NOT NULL,
+  fst_work_id INT NOT NULL,
+  snd_work_id INT,
+  FOREIGN KEY (deployment_id) REFERENCES deployment(deployment_id),
+  FOREIGN KEY (block_trace_id) REFERENCES block_trace(block_trace_id)
+);
+
+-- Function to extract and insert snark work interruption data
+-- Function to extract and insert snark work interruption data
+CREATE OR REPLACE FUNCTION sw_interruptions_trigger() RETURNS trigger AS $$
+BEGIN
+  INSERT INTO sw_interruptions (
+    block_trace_id,
+    deployment_id,
+    at,
+    reason,
+    fst_work_id,
+    snd_work_id
+  ) VALUES (
+    new.block_trace_id,
+    new.deployment_id,
+    CAST(new.metadata_json->>'interrupt_get_completed_work_at' AS INT),
+    new.metadata_json->>'interrupt_get_completed_work_reason',
+    CAST(new.metadata_json #>> '{interrupt_get_completed_work_ids,0}' AS INT),
+    CAST(new.metadata_json #>> '{interrupt_get_completed_work_ids,1}' AS INT)
+  ) ON CONFLICT (block_trace_id) DO NOTHING;
+  RETURN NEW;
+END;
+$$ LANGUAGE 'plpgsql';
+
+-- Create trigger to monitor block_trace for interruption metadata
+DROP TRIGGER IF EXISTS block_trace_sw_interruptions ON block_trace;
+CREATE TRIGGER block_trace_sw_interruptions AFTER INSERT OR UPDATE OF metadata_json ON block_trace
+FOR EACH ROW
+WHEN (new.metadata_json ? 'interrupt_get_completed_work_at')
+EXECUTE FUNCTION sw_interruptions_trigger();
+
 -- View for snark work statistics grouped by experiment, round, and transaction type
 CREATE OR REPLACE VIEW sw_experiments AS
 WITH sws_ AS (
