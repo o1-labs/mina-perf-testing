@@ -80,6 +80,11 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 		loadAwsCredentials(awsCredentialsFile, log)
 	}
 
+	// Set default rate limit if not specified
+	if config.RequestsPerPkHourly == 0 {
+		config.RequestsPerPkHourly = 360
+	}
+
 	return config
 }
 
@@ -90,10 +95,11 @@ type AwsConfig struct {
 }
 
 type AppConfig struct {
-	Aws       *AwsConfig `json:"aws"`
-	GsheetId  string     `json:"gsheet_id"`
-	Whitelist []string   `json:"whitelist"`
-	InMemory  bool       `json:"in_memory"`
+	Aws                *AwsConfig `json:"aws"`
+	GsheetId           string     `json:"gsheet_id"`
+	Whitelist          []string   `json:"whitelist"`
+	InMemory           bool       `json:"in_memory"`
+	RequestsPerPkHourly int        `json:"requests_per_pk_hourly"`
 }
 
 type AwsCredentials struct {
