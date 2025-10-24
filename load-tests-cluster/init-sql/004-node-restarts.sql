@@ -1,6 +1,15 @@
 -- Migration: Node Restarts Tracking
 -- Description: Add table to track node restart events with timestamp, reason, and exit code
+--              Also fix uniq_sws primary key constraint to handle nullable snd_work_id
 -- Date: 2025-10-24
+
+-- Fix uniq_sws table: snd_work_id is nullable but was part of PRIMARY KEY
+-- PostgreSQL doesn't allow NULL in primary keys, so we use COALESCE with a sentinel value
+ALTER TABLE uniq_sws DROP CONSTRAINT IF EXISTS uniq_sws_pkey;
+
+-- Create unique index using COALESCE to handle NULL snd_work_id (-1 as sentinel value)
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_sws_unique_key 
+ON uniq_sws (deployment_id, fst_work_id, COALESCE(snd_work_id, -1));
 
 -- Table to store node restart events
 CREATE TABLE IF NOT EXISTS node_restarts (
