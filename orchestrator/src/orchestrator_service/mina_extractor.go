@@ -101,7 +101,7 @@ func getMinaExecutablePath(db *gorm.DB, log logging.StandardLogger) (string, err
 	}
 	
 	// Extract executable from Docker image
-	dockerImage := fmt.Sprintf("gcr.io/o1labs-192920/mina-daemon:%s", processedRelease)
+	dockerImage := fmt.Sprintf("europe-west3-docker.pkg.dev/o1labs-192920/euro-docker-repo/mina-daemon:%s", processedRelease)
 	log.Infof("Extracting Mina executable from Docker image: %s", dockerImage)
 	
 	if err := extractMinaBinary(dockerImage, executablePath, log); err != nil {
@@ -162,7 +162,7 @@ func extractMinaBinary(dockerImage, outputFile string, log logging.StandardLogge
 }
 
 func getRegistryToken(log logging.StandardLogger) (string, error) {
-	tokenURL := "https://gcr.io/v2/token?service=gcr.io&scope=repository:o1labs-192920/mina-daemon:pull"
+	tokenURL := "https://europe-west3-docker.pkg.dev/v2/token?service=europe-west3-docker.pkg.dev&scope=repository:o1labs-192920/euro-docker-repo/mina-daemon:pull"
 	
 	resp, err := http.Get(tokenURL)
 	if err != nil {
@@ -197,9 +197,9 @@ func getImageManifest(token, dockerImage string, log logging.StandardLogger) (*M
 	tag := parts[1]
 	
 	// Remove registry prefix for the API call
-	repo := strings.TrimPrefix(repository, "gcr.io/")
+	repo := strings.TrimPrefix(repository, "europe-west3-docker.pkg.dev/")
 	
-	manifestURL := fmt.Sprintf("https://gcr.io/v2/%s/manifests/%s", repo, tag)
+	manifestURL := fmt.Sprintf("https://europe-west3-docker.pkg.dev/v2/%s/manifests/%s", repo, tag)
 	
 	req, err := http.NewRequest("GET", manifestURL, nil)
 	if err != nil {
@@ -232,10 +232,10 @@ func processLayer(token, digest, tempDir string, layerNum int, outputFile, docke
 	// Parse repository from dockerImage for blob URL
 	parts := strings.Split(dockerImage, ":")
 	repository := parts[0]
-	repo := strings.TrimPrefix(repository, "gcr.io/")
+	repo := strings.TrimPrefix(repository, "europe-west3-docker.pkg.dev/")
 	
 	// Download layer
-	blobURL := fmt.Sprintf("https://gcr.io/v2/%s/blobs/%s", repo, digest)
+	blobURL := fmt.Sprintf("https://europe-west3-docker.pkg.dev/v2/%s/blobs/%s", repo, digest)
 	layerFile := filepath.Join(tempDir, fmt.Sprintf("layer_%d.tar.gz", layerNum))
 
 	if err := downloadLayer(token, blobURL, layerFile, log); err != nil {
