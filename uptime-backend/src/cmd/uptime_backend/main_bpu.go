@@ -63,7 +63,7 @@ func main() {
 	}
 
 	app.Now = func() time.Time { return time.Now() }
-	app.SubmitCounter = NewAttemptCounter(REQUESTS_PER_PK_HOURLY)
+	app.SubmitCounter = NewAttemptCounter(appCfg.RequestsPerPkHourly)
 
 	whitelist := appCfg.Whitelist
 	app.Whitelist = new(WhitelistMVar)
