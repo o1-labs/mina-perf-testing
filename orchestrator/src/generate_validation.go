@@ -41,12 +41,12 @@ func ValidationSteps(p *GenParams) []ValidationStep {
 		simpleRangeCheck(p.MinStopRatio, "min stop ratio"),
 		simpleRangeCheck(p.MaxStopRatio, "max stop ratio"),
 		simpleRangeCheck(p.StopCleanRatio, "stop-clean ratio"),
-		simpleRangeCheck(p.MixMaxCostTpsRatio, "max-cost-mixed ratio"),
+		simpleRangeCheck(p.MaxCostMixedTpsRatio, "max-cost-mixed ratio"),
 		simpleRangeCheck(p.RotationRatio, "rotation ratio"),
 		{
 			ErrorMsg: "both max-cost-mixed and max-cost specified",
 			Check: func(p *GenParams) bool {
-				return p.MaxCost && p.MixMaxCostTpsRatio > 1e-3
+				return p.MaxCost && p.MaxCostMixedTpsRatio > 1e-3
 			},
 			ExitCode: 2,
 		},

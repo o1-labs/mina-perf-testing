@@ -1,18 +1,170 @@
 package itn_orchestrator
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+
+	logging "github.com/ipfs/go-log/v2"
 )
+
+// RoundInfo holds information about a single round
+type RoundInfo struct {
+	PaymentCount    int     `json:"payment_count"`
+	ZkappCount      int     `json:"zkapp_count"`
+	PaymentTps      float64 `json:"payment_tps"`
+	ZkappTps        float64 `json:"zkapp_tps"`
+	DurationMinutes int     `json:"duration_minutes"`
+	MaxCost         bool    `json:"max_cost"`
+}
+
+// ExperimentInfo holds information about the entire experiment
+type ExperimentInfo []RoundInfo
 
 func fund(p FundParams) GeneratedCommand {
 	return GeneratedCommand{Action: FundAction{}.Name(), Params: p}
 }
 
-func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func(string)) {
+// EncodeToWriter encodes experiment parameters to a writer using JSON encoding
+// Returns experiment info and error
+// isService: if true, uses secure logging that doesn't expose passwords
+func EncodeToWriter(p *GenParams, writer io.Writer, setup interface{}) (ExperimentInfo, error) {
+	encoder := json.NewEncoder(writer)
+	var errors []string
 
-	writeComment("Generated with: " + strings.Join(os.Args, " "))
+	writeComment := func(comment string) {
+		if err := encoder.Encode(comment); err != nil {
+			errors = append(errors, fmt.Sprintf("Error writing comment: %v", err))
+		}
+	}
+	writeCommand := func(cmd GeneratedCommand) {
+		if comment := cmd.Comment(); comment != "" {
+			writeComment(comment)
+		}
+		if err := encoder.Encode(cmd); err != nil {
+			errors = append(errors, fmt.Sprintf("Error writing command: %v", err))
+		}
+	}
+
+	experimentInfo := EncodeWithContext(p, writeCommand, writeComment, setup)
+
+	if len(errors) > 0 {
+		return ExperimentInfo{}, fmt.Errorf("encoding errors: %s", strings.Join(errors, "; "))
+	}
+	return experimentInfo, nil
+}
+
+// printComment prints a comment to both log and stderr
+func printComment(comment string, log logging.StandardLogger) {
+	log.Info(comment)
+	fmt.Fprintln(os.Stderr, comment)
+}
+
+// RunExperiment executes an experiment from a JSON decoder with the given configuration
+// Returns error if execution fails, nil on success
+func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardLogger) error {
+	outCache := EmptyOutputCache()
+	rconfig := ResolutionConfig{
+		OutputCache: outCache,
+	}
+	step := 0
+	var prevAction BatchAction
+	var actionAccum []ActionIO
+	var batchStartStep int // Track the starting step of current batch
+	var preBatchComments []string  // Comments to print before current batch executes
+	var postBatchComments []string // Comments accumulated after batch started
+
+	handlePrevAction := func() error {
+		// Print pre-batch comments before executing the action
+		for _, comment := range preBatchComments {
+			printComment(comment, log)
+		}
+		preBatchComments = nil
+
+		// Calculate correct step range for the batch
+		batchEndStep := batchStartStep + len(actionAccum) - 1
+		if len(actionAccum) == 1 {
+			log.Infof("Performing step %s (%d)", prevAction.Name(), batchStartStep)
+		} else {
+			log.Infof("Performing steps %s (%d-%d)", prevAction.Name(), batchStartStep, batchEndStep)
+		}
+		err := prevAction.RunMany(config, actionAccum)
+		if err != nil {
+			batchEndStep := batchStartStep + len(actionAccum) - 1
+			if len(actionAccum) == 1 {
+				return &OrchestratorError{
+					Message: fmt.Sprintf("Error running step %d: %v", batchStartStep, err),
+					Code:    9,
+				}
+			} else {
+				return &OrchestratorError{
+					Message: fmt.Sprintf("Error running steps %d-%d: %v", batchStartStep, batchEndStep, err),
+					Code:    9,
+				}
+			}
+		}
+		prevAction = nil
+		actionAccum = nil
+
+		// Move post-batch comments to pre-batch for next action
+		preBatchComments = postBatchComments
+		postBatchComments = nil
+		return nil
+	}
+
+	err := RunActions(inDecoder, config, outCache, log, step,
+		handlePrevAction, &actionAccum, rconfig, &prevAction, &preBatchComments, &postBatchComments, &batchStartStep)
+	if err != nil {
+		if orchErr, ok := err.(*OrchestratorError); ok {
+			log.Errorf("Experiment finished with error: %v", orchErr)
+			return orchErr
+		}
+		return err
+	}
+
+	if prevAction != nil {
+		if err := handlePrevAction(); err != nil {
+			log.Errorf("Error running action: %s due to: %v", prevAction.Name(), err)
+			// Check if context is canceled
+			if config.Ctx.Err() != nil {
+				return config.Ctx.Err()
+			}
+			return &OrchestratorError{
+				Message: fmt.Sprintf("Error running previous action: %v", err),
+				Code:    9,
+			}
+		}
+	}
+
+	// Print any remaining accumulated comments at the end
+	for _, comment := range preBatchComments {
+		printComment(comment, log)
+	}
+	for _, comment := range postBatchComments {
+		printComment(comment, log)
+	}
+	return nil
+}
+
+func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func(string)) ExperimentInfo {
+	return EncodeWithContext(p, writeCommand, writeComment, false)
+}
+
+func EncodeWithContext(p *GenParams, writeCommand func(GeneratedCommand), writeComment func(string), setup interface{}) ExperimentInfo {
+	// For orchestrator service, show experiment setup instead of command args (which contain passwords)
+	// For standalone generator, show command args as before
+	if setup != nil {
+		setupJSON, err := json.Marshal(setup)
+		if err != nil {
+			writeComment("Generated by orchestrator service (error serializing setup)")
+		} else {
+			writeComment("Generated by orchestrator service with setup: " + string(setupJSON))
+		}
+	} else {
+		writeComment("Generated with: " + strings.Join(os.Args, " "))
+	}
 	if p.ZkappSoftLimit > -2 {
 		writeCommand(Discovery(DiscoveryParams{}))
 		writeComment(fmt.Sprintf("Setting zkapp soft limit to %d", p.ZkappSoftLimit))
@@ -20,6 +172,8 @@ func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func
 	}
 	cmds := []GeneratedCommand{}
 	fundCmds := []FundParams{}
+	var rounds []RoundInfo
+
 	writeComment("Funding keys for the experiment")
 	for r := 0; r < p.Rounds; r++ {
 		round := p.Generate(r)
@@ -30,6 +184,8 @@ func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func
 		if round.ZkappFundCommand != nil {
 			fundCmds = append(fundCmds, *round.ZkappFundCommand)
 		}
+		// Collect round info from the generated round
+		rounds = append(rounds, round.RoundInfo)
 	}
 	privkeys := p.Privkeys
 	if p.GenerateFundKeys > 0 {
@@ -74,4 +230,5 @@ func Encode(p *GenParams, writeCommand func(GeneratedCommand), writeComment func
 	for _, cmd := range cmds {
 		writeCommand(cmd)
 	}
+	return rounds
 }
