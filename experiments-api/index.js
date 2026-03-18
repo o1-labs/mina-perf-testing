@@ -63,6 +63,57 @@ app.post('/api/deployments', async (req, res) => {
 });
 
 
+// POST /api/node-restarts
+app.post('/api/node-restarts', async (req, res) => {
+  const { 
+    node_name, 
+    reason, 
+    code, 
+    object_name, 
+    object_namespace, 
+    container_name, 
+    restart_count 
+  } = req.body;
+
+  if (!node_name) {
+    return res.status(400).json({ error: 'Missing required field: "node_name"' });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO node_restarts (
+        node_name, 
+        reason, 
+        code, 
+        object_name, 
+        object_namespace, 
+        container_name, 
+        restart_count
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
+      RETURNING id, time`,
+      [
+        node_name,
+        reason || null,
+        code || null,
+        object_name || null,
+        object_namespace || null,
+        container_name || null,
+        restart_count || null
+      ]
+    );
+
+    res.status(201).json({
+      message: 'Node restart recorded',
+      id: result.rows[0].id,
+      time: result.rows[0].time
+    });
+  } catch (err) {
+    console.error('Error inserting node restart:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+
 app.post('/api/tracing/cleanup', async (req, res) => {
 
   
