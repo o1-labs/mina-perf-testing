@@ -86,6 +86,19 @@ func (a *App) Run(address string) {
 }
 
 func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.StandardLogger) {
+	// Get and set the Mina executable path from deployment metadata
+	minaExecPath, err := getMinaExecutablePath(a.Store.DB, log)
+	if err != nil {
+		// Log the error and add to warnings, but don't fail the experiment
+		warningMsg := fmt.Sprintf("Failed to extract Mina executable from deployment metadata: %v. Using existing MinaExec from config.", err)
+		log.Warnf(warningMsg)
+		a.Store.AppendWarningF(warningMsg)
+	} else {
+		// Update config with the extracted Mina executable path
+		config.MinaExec = minaExecPath
+		log.Infof("Using extracted Mina executable: %s", minaExecPath)
+	}
+	
 	if err := lib.RunExperiment(inDecoder, config, log); err != nil {
 		var orchErr *lib.OrchestratorError
 		var ok bool
