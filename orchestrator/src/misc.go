@@ -192,6 +192,9 @@ func (SampleAction) Run(config Config, rawParams json.RawMessage, output OutputF
 	})
 	for i, r := range params.Ratios {
 		take := int(math.Round(r * float64(groupLen)))
+		if take > len(group) {
+			take = len(group)
+		}
 		output(fmt.Sprintf("group%d", i+1), group[:take], false, false)
 		group = group[take:]
 	}

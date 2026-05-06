@@ -192,15 +192,17 @@ func getImageManifest(token, dockerImage string, log logging.StandardLogger) (*M
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid docker image format: %s", dockerImage)
 	}
-	
+
 	repository := parts[0]
 	tag := parts[1]
-	
+
 	// Remove registry prefix for the API call
 	repo := strings.TrimPrefix(repository, "europe-west3-docker.pkg.dev/")
-	
+
 	manifestURL := fmt.Sprintf("https://europe-west3-docker.pkg.dev/v2/%s/manifests/%s", repo, tag)
-	
+
+	log.Infof("Fetching image manifest: url=%s tag=%s", manifestURL, tag)
+
 	req, err := http.NewRequest("GET", manifestURL, nil)
 	if err != nil {
 		return nil, err
@@ -217,7 +219,7 @@ func getImageManifest(token, dockerImage string, log logging.StandardLogger) (*M
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("manifest request failed with status: %s", resp.Status)
+		return nil, fmt.Errorf("manifest request failed with status: %s (url=%s, tag=%s)", resp.Status, manifestURL, tag)
 	}
 
 	var manifest Manifest
