@@ -189,6 +189,12 @@ func (h *SubmitH) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if remoteAddr == "" {
 		// If there is no X-Forwarded-For header, use the remote address
 		remoteAddr = r.RemoteAddr
+	} else {
+		// X-Forwarded-For may be comma-separated; take the first entry (the original client IP)
+		if idx := strings.IndexByte(remoteAddr, ','); idx != -1 {
+			remoteAddr = remoteAddr[:idx]
+		}
+		remoteAddr = strings.TrimSpace(remoteAddr)
 	}
 
 	meta := req.MakeMetaToBeSaved(remoteAddr)
