@@ -7,10 +7,12 @@ ARG CONFIG
 ENV CONFIG=${CONFIG} 
 
 WORKDIR /
+ENV GOFLAGS=-buildvcs=false
 COPY . .
 RUN make orchestrator_service
 
-FROM debian:bullseye AS app
+FROM ubuntu:jammy AS app
+ENV DEBIAN_FRONTEND=noninteractive
 COPY --from=builder /orchestrator_service /orchestrator_service
 
 RUN apt-get update --quiet --yes \
@@ -22,15 +24,16 @@ RUN apt-get update --quiet --yes \
     gnupg2 \
     libgmp10 \
     libgomp1 \
-    libssl1.1 \
+    libssl3 \
     libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 
 RUN echo "downloading mina" \
-  && echo "deb [trusted=yes] https://packages.o1test.net bullseye experimental" > /etc/apt/sources.list.d/o1.list \
+  && echo "deb [trusted=yes] http://packages.o1test.net jammy umt" > /etc/apt/sources.list.d/mina.list \
   && apt-get update --quiet --yes \
-  && apt-get install --quiet --yes --allow-downgrades mina-devnet=3.1.1-alpha1-compatible-adb75bc \
+  && apt-get install --quiet --yes --allow-downgrades \
+    mina-mesa-mut=3.4.0-alpha1-11401cc \
+    mina-mesa-mut-config=3.4.0-alpha1-11401cc \
   && rm -rf /var/lib/apt/lists/*
 
 ENTRYPOINT [ "/bin/sh", "-c", "/orchestrator_service -conn \"$PSQL_CONNECTION_STRING\" -config \"$CONFIG\" -address \":9090\"" ]
-
