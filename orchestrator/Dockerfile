@@ -1,5 +1,6 @@
 FROM golang:1.23.4-bookworm AS builder
 WORKDIR /
+ENV GOFLAGS=-buildvcs=false
 COPY . .
 RUN make generator && make orchestrator
 
