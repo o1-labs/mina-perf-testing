@@ -206,27 +206,27 @@ func (SampleAction) Name() string { return "sample" }
 
 var _ Action = SampleAction{}
 
-func selectNodes(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddress) {
+func selectNodesWithFallback(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddress, []NodeAddress) {
 	if len(nodes) == 0 {
-		return tps, nodes // Return empty slice if no nodes available
+		return tps, nodes, nil // Return empty slice if no nodes available
 	}
-	
+
 	nodesF := math.Floor(tps / minTps)
 	nodesMax := int(nodesF)
-	
+
 	// Ensure we always select at least one node if nodes are available
 	if nodesMax == 0 && len(nodes) > 0 {
 		nodesMax = 1
 		nodesF = 1.0
 	}
-	
+
 	if nodesMax >= len(nodes) {
-		return tps / float64(len(nodes)), nodes
+		return tps / float64(len(nodes)), nodes, nil
 	}
 	rand.Shuffle(len(nodes), func(i, j int) {
 		nodes[i], nodes[j] = nodes[j], nodes[i]
 	})
-	return tps / nodesF, nodes[:nodesMax]
+	return tps / nodesF, nodes[:nodesMax], nodes[nodesMax:]
 }
 
 func retryOnMultipleServers(servers []string, ctx context.Context, serverIx int, commandName string, log logging.StandardLogger, try func(string) error) (err error) {

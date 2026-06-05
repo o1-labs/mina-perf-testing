@@ -1,4 +1,14 @@
-FROM golang:1.23.4-bullseye AS builder
+FROM ubuntu:jammy AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=/usr/lib/go-1.23/bin:$PATH
+
+RUN apt-get update --quiet --yes \
+  && apt-get install --quiet --yes --no-install-recommends \
+    ca-certificates \
+    golang-1.23-go \
+    make \
+  && rm -rf /var/lib/apt/lists/*
 
 ARG PSQL_CONNECTION_STRING
 ENV PSQL_CONNECTION_STRING=${PSQL_CONNECTION_STRING}
@@ -7,10 +17,12 @@ ARG CONFIG
 ENV CONFIG=${CONFIG} 
 
 WORKDIR /
+ENV GOFLAGS=-buildvcs=false
 COPY . .
 RUN make orchestrator_service
 
-FROM debian:bullseye AS app
+FROM ubuntu:jammy AS app
+ENV DEBIAN_FRONTEND=noninteractive
 COPY --from=builder /orchestrator_service /orchestrator_service
 
 RUN apt-get update --quiet --yes \
@@ -22,15 +34,16 @@ RUN apt-get update --quiet --yes \
     gnupg2 \
     libgmp10 \
     libgomp1 \
-    libssl1.1 \
+    libssl3 \
     libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 
-
-RUN echo "deb [trusted=yes] https://packages.o1test.net bullseye stable" > /etc/apt/sources.list.d/o1.list \
+RUN echo "downloading mina" \
+  && echo "deb [trusted=yes] http://packages.o1test.net jammy umt" > /etc/apt/sources.list.d/mina.list \
   && apt-get update --quiet --yes \
-  && apt-get install --quiet --yes --no-install-recommends mina-mainnet=3.3.1-7b34378 \
+  && apt-get install --quiet --yes --allow-downgrades \
+    mina-mesa-mut=4.0.0-rc1-mesa-mut-d7513d4 \
+    mina-mesa-mut-config=4.0.0-rc1-mesa-mut-d7513d4 \
   && rm -rf /var/lib/apt/lists/*
 
 ENTRYPOINT [ "/bin/sh", "-c", "/orchestrator_service -conn \"$PSQL_CONNECTION_STRING\" -config \"$CONFIG\" -address \":9090\"" ]
-

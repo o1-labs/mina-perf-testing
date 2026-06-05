@@ -55,9 +55,9 @@ func getLatestDeploymentRelease(db *gorm.DB) (string, error) {
 	return release.String, nil
 }
 
-// processReleaseString processes the release string to ensure it uses bullseye
+// processReleaseString processes the release string to ensure it uses jammy
 func processReleaseString(release string) string {
-	// Split by dashes: e.g., "3.3.0-alpha1-compatible-90ff48c-bullseye-devnet"
+	// Split by dashes: e.g., "3.3.0-alpha1-compatible-90ff48c-jammy-devnet"
 	parts := strings.Split(release, "-")
 	
 	if len(parts) < 5 {
@@ -65,10 +65,10 @@ func processReleaseString(release string) string {
 		return release
 	}
 	
-	// Check if the second-to-last part (index len-2) is not "bullseye"
-	if parts[len(parts)-2] != "bullseye" {
-		// Replace it with "bullseye"
-		parts[len(parts)-2] = "bullseye"
+	// Check if the second-to-last part (index len-2) is not "jammy"
+	if parts[len(parts)-2] != "jammy" {
+		// Replace it with "jammy"
+		parts[len(parts)-2] = "jammy"
 	}
 	
 	return strings.Join(parts, "-")
@@ -82,7 +82,7 @@ func getMinaExecutablePath(db *gorm.DB, log logging.StandardLogger) (string, err
 		return "", fmt.Errorf("failed to get deployment release: %w", err)
 	}
 	
-	// Process the release string to ensure bullseye
+	// Process the release string to ensure jammy
 	processedRelease := processReleaseString(release)
 	
 	// Create cache directory if it doesn't exist
