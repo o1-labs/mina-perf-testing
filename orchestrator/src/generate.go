@@ -16,6 +16,7 @@ type GenParams struct {
 	StopCleanRatio, MinStopRatio, MaxStopRatio                           float64
 	RoundDurationMin, PauseMin, Rounds, StopsPerRound, Gap               int
 	SendFromNonBpsOnly, StopOnlyBps, UseRestartScript, MaxCost           bool
+	NonDefaultToken                                                      bool
 	ExperimentName, PasswordEnv, FundKeyPrefix                           string
 	Privkeys                                                             []string
 	PaymentReceiver                                                      itn_json_types.MinaPublicKey
@@ -52,6 +53,7 @@ func DefaultGenParams() GenParams {
 		StopOnlyBps:            false,
 		UseRestartScript:       false,
 		MaxCost:                false,
+		NonDefaultToken:        false,
 		ExperimentName:         "exp-0",
 		PasswordEnv:            "",
 		FundKeyPrefix:          "./fund_keys",
@@ -361,6 +363,7 @@ func (p *GenParams) Generate(round int) GeneratedRound {
 		MaxFee:           p.MaxZkappFee,
 		DeploymentFee:    p.DeploymentFee,
 		MaxCost:          maxCost,
+		NonDefaultToken:  p.NonDefaultToken,
 		NewAccountRatio:  p.NewAccountRatio,
 	}
 	if maxCost {

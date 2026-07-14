@@ -191,6 +191,15 @@ input ZkappCommandsDetails {
   """Generate max cost zkApp command"""
   maxCost: Boolean!
 
+  """
+  When true, the scheduled (non-max-cost) zkApp load initializes a custom,
+  non-default (owned) token and transacts in it instead of the default MINA
+  token. Defaults to false. Has no effect when maxCost is set. Daemons that do
+  not define this field ignore it (ocaml-graphql-server drops unknown input
+  fields), so sending it (as false) to an older daemon is harmless.
+  """
+  nonDefaultToken: Boolean
+
   """The size of queue for recently used accounts"""
   accountQueueSize: Int!
 
