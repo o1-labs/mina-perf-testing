@@ -51,6 +51,27 @@ func ValidationSteps(p *GenParams) []ValidationStep {
 			ExitCode: 2,
 		},
 		{
+			ErrorMsg: "non-default-token has no effect with max-cost (max-cost commands always use the default token)",
+			Check: func(p *GenParams) bool {
+				return p.NonDefaultToken && p.MaxCost
+			},
+			ExitCode: 2,
+		},
+		{
+			ErrorMsg: "non-default-token has no effect with max-cost-mixed (its stress rounds run max-cost commands)",
+			Check: func(p *GenParams) bool {
+				return p.NonDefaultToken && p.MaxCostMixedTpsRatio > 1e-3
+			},
+			ExitCode: 2,
+		},
+		{
+			ErrorMsg: "non-default-token requires a non-zero zkapp ratio (it only affects the zkApp load)",
+			Check: func(p *GenParams) bool {
+				return p.NonDefaultToken && p.ZkappRatio < 1e-3
+			},
+			ExitCode: 2,
+		},
+		{
 			ErrorMsg: "wrong large-pause-every: should be a positive number",
 			Check: func(p *GenParams) bool {
 				return p.LargePauseEveryNRounds <= 0
