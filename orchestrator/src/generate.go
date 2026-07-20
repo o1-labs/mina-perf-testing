@@ -427,14 +427,14 @@ func (p *GenParams) Generate(round int) GeneratedRound {
 		participantsRef = -1
 	}
 	if onlyPayments {
-		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: paymentsKeysDir}))
+		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: paymentsKeysDir, PasswordEnv: p.PasswordEnv}))
 		cmds = append(cmds, payments(-1, participantsRef-1, participantsName, paymentParams))
 	} else if onlyZkapps {
-		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: zkappsKeysDir}))
+		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: zkappsKeysDir, PasswordEnv: p.PasswordEnv}))
 		cmds = append(cmds, zkapps(-1, participantsRef-1, participantsName, zkappParams))
 	} else {
-		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: zkappsKeysDir}))
-		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: paymentsKeysDir}))
+		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: zkappsKeysDir, PasswordEnv: p.PasswordEnv}))
+		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: paymentsKeysDir, PasswordEnv: p.PasswordEnv}))
 		cmds = append(cmds, zkapps(-2, participantsRef-2, participantsName, zkappParams))
 		cmds = append(cmds, payments(-2, participantsRef-3, participantsName, paymentParams))
 		cmds = append(cmds, join(-1, "participant", -2, "participant"))
