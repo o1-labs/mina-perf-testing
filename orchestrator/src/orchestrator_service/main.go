@@ -105,7 +105,9 @@ func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.St
 					" Fix the deployment release recorded in the database, or set allowUnverifiedMinaExec to accept the risk.", config.MinaExec),
 				Code: 9,
 			}
-			log.Errorf(orchErr.Message)
+			// Not log.Errorf: that logger appends to the experiment's errors
+			// too, and FinishWithError is about to record this message —
+			// logging it here as well files the same refusal twice.
 			if experiment := a.Store.FinishWithError(orchErr); experiment != nil && experiment.WebhookURL != "" {
 				go a.WebhookNotifier.SendErrorNotification(
 					context.Background(),
