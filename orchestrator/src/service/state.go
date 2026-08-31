@@ -85,25 +85,28 @@ func NewStore(db *gorm.DB) *Store {
 // history kept a row that claimed to be in progress forever. Marking them
 // terminal here is what makes a restart a real recovery — and it is also the
 // only record that a run was lost, since the process that knew about it is gone.
+// This runs as one UPDATE rather than a read-modify-write loop, because
+// ExperimentState cannot be read back through GORM at all: Setup is a
+// lib.GenParams, which implements no sql.Scanner, so any SELECT into the struct
+// fails with "unsupported Scan, storing driver.Value type []uint8". The same
+// reason updateExperimentInDB marshals Setup by hand on the way out.
 func (s *Store) reconcileInterruptedExperiments() {
-	var interrupted []ExperimentState
-	err := s.DB.Where("status IN ?", []ExperimentStatus{Running, Cancelling}).Find(&interrupted).Error
-	if err != nil {
-		log.Printf("Error looking for interrupted experiments: %v", err)
+	const note = "Experiment interrupted: the orchestrator restarted while this run was in progress"
+
+	result := s.DB.Exec(`
+		UPDATE experiment_state
+		SET status = 'error',
+		    ended_at = now(),
+		    updated_at = now(),
+		    errors = array_append(coalesce(errors, ARRAY[]::text[]), ?)
+		WHERE status IN (?, ?)`, note, string(Running), string(Cancelling))
+	if result.Error != nil {
+		log.Printf("Error closing out interrupted experiments: %v", result.Error)
 		return
 	}
-	for i := range interrupted {
-		experiment := &interrupted[i]
-		log.Printf("Experiment %q was %s when the orchestrator last stopped; marking it interrupted",
-			experiment.Name, experiment.Status)
-		experiment.Status = "error"
-		experiment.Errors = append(experiment.Errors,
-			"Experiment interrupted: the orchestrator restarted while this run was in progress")
-		experiment.UpdatedAt = time.Now()
-		markEnded(experiment)
-		if err := s.updateExperimentInDB(experiment); err != nil {
-			log.Printf("Error closing out interrupted experiment %q: %v", experiment.Name, err)
-		}
+	if result.RowsAffected > 0 {
+		log.Printf("Closed out %d experiment(s) left in progress when the orchestrator last stopped",
+			result.RowsAffected)
 	}
 }
 
