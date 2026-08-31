@@ -3,14 +3,18 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	logging "github.com/ipfs/go-log/v2"
 	"gorm.io/gorm"
@@ -72,6 +76,29 @@ func processReleaseString(release string) string {
 	}
 	
 	return strings.Join(parts, "-")
+}
+
+var minaCommitRe = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
+
+// minaCommit reports the Mina commit a client binary was built from.
+//
+// This is the only trustworthy identifier of a build. Image tags are not: the
+// ITN2 daemon image tagged `…-3418329-jammy-devnet` reported a commitId of
+// e419c3d6 — the tag named a build that was not the one running. Compare
+// commits, never tags.
+func minaCommit(execPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, execPath, "--version").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("running %q --version: %w (output: %s)", execPath, err, strings.TrimSpace(string(out)))
+	}
+	commit := minaCommitRe.FindString(string(out))
+	if commit == "" {
+		return "", fmt.Errorf("no commit in %q --version output: %s", execPath, strings.TrimSpace(string(out)))
+	}
+	return commit, nil
 }
 
 // getMinaExecutablePath returns the path to the cached Mina executable, extracting it if necessary

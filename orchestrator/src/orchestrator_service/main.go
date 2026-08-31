@@ -86,11 +86,39 @@ func (a *App) Run(address string) {
 }
 
 func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.StandardLogger) {
-	// Get and set the Mina executable path from deployment metadata
+	// Take the mina client out of the deployed daemon image, so the client the
+	// funding step shells out to is the daemon's own build by construction.
+	//
+	// Failing that is not a warning. A client built from a different Mina
+	// commit than the daemon does not error — the daemon cannot bin_prot-decode
+	// the query, fund-keys retries every two minutes, and the experiment sits
+	// at step 0 indefinitely reporting nothing. That is how the 2026-08-25 run
+	// was lost. Refuse instead, unless the operator has explicitly accepted an
+	// unverified pairing.
 	minaExecPath, err := getMinaExecutablePath(a.Store.DB, log)
 	if err != nil {
-		// Log the error and add to warnings, but don't fail the experiment
-		warningMsg := fmt.Sprintf("Failed to extract Mina executable from deployment metadata: %v. Using existing MinaExec from config.", err)
+		msg := fmt.Sprintf("Could not take the mina client from the deployed daemon image: %v.", err)
+		if !config.AllowUnverifiedMinaExec {
+			orchErr := &lib.OrchestratorError{
+				Message: msg + fmt.Sprintf(" Refusing to run: the configured client %q is not known to match the deployed daemon,"+
+					" and a mismatched pair hangs in fund-keys rather than failing."+
+					" Fix the deployment release recorded in the database, or set allowUnverifiedMinaExec to accept the risk.", config.MinaExec),
+				Code: 9,
+			}
+			log.Errorf(orchErr.Message)
+			if experiment := a.Store.FinishWithError(orchErr); experiment != nil && experiment.WebhookURL != "" {
+				go a.WebhookNotifier.SendErrorNotification(
+					context.Background(),
+					experiment.WebhookURL,
+					experiment.Name,
+					orchErr.Message,
+					experiment.Warnings,
+				)
+			}
+			return
+		}
+		warningMsg := msg + fmt.Sprintf(" Continuing with the configured client %q because allowUnverifiedMinaExec is set;"+
+			" if it does not match the daemon, funding will hang rather than fail.", config.MinaExec)
 		log.Warnf(warningMsg)
 		a.Store.AppendWarningF(warningMsg)
 	} else {
@@ -98,7 +126,16 @@ func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.St
 		config.MinaExec = minaExecPath
 		log.Infof("Using extracted Mina executable: %s", minaExecPath)
 	}
-	
+
+	// Record which build is actually driving the experiment. Without this the
+	// only evidence of the client's identity is an image tag, which can name a
+	// build other than the one running.
+	if commit, cErr := minaCommit(config.MinaExec); cErr != nil {
+		a.Store.AppendWarningF("Could not read the mina client version from %q: %v", config.MinaExec, cErr)
+	} else {
+		a.Store.AppendLogF("Using mina client %s (commit %s)", config.MinaExec, commit)
+	}
+
 	if err := lib.RunExperiment(inDecoder, config, log); err != nil {
 		var orchErr *lib.OrchestratorError
 		var ok bool
