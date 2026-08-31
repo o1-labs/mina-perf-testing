@@ -38,12 +38,18 @@ RUN apt-get update --quiet --yes \
     libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 
+# The bundled client is a fallback only — the service takes its mina from the
+# deployed daemon image at run time, which is the sole way the client and the
+# daemon are guaranteed to be the same build. Pin a pair that exists: the repo
+# carries mina-mesa-mut at 4.0.0-rc1-mesa-mut-d7513d4 but no matching
+# mina-mesa-mut-config, so that pin cannot be built at all. 4.0.0-rc1-83b4654 is
+# the pair the running orchestrator image was actually built from.
 RUN echo "downloading mina" \
   && echo "deb [trusted=yes] http://packages.o1test.net jammy umt" > /etc/apt/sources.list.d/mina.list \
   && apt-get update --quiet --yes \
   && apt-get install --quiet --yes --allow-downgrades \
-    mina-mesa-mut=4.0.0-rc1-mesa-mut-d7513d4 \
-    mina-mesa-mut-config=4.0.0-rc1-mesa-mut-d7513d4 \
+    mina-mesa-mut=4.0.0-rc1-83b4654 \
+    mina-mesa-mut-config=4.0.0-rc1-83b4654 \
   && rm -rf /var/lib/apt/lists/*
 
 ENTRYPOINT [ "/bin/sh", "-c", "/orchestrator_service -conn \"$PSQL_CONNECTION_STRING\" -config \"$CONFIG\" -address \":9090\"" ]
