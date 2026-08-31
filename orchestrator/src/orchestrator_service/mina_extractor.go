@@ -59,23 +59,37 @@ func getLatestDeploymentRelease(db *gorm.DB) (string, error) {
 	return release.String, nil
 }
 
-// processReleaseString processes the release string to ensure it uses jammy
+// osCodenames are the distributions mina-daemon images are built for. Only a
+// segment naming one of these is a codename we may rewrite.
+var osCodenames = map[string]bool{
+	"bullseye": true, "bookworm": true, "buster": true,
+	"focal": true, "jammy": true, "noble": true,
+}
+
+// processReleaseString rewrites a release tag to its jammy build, which is the
+// one the orchestrator's own image can run.
+//
+// Only a segment that actually names an OS codename is rewritten. Rewriting the
+// second-to-last segment unconditionally was wrong for any tag whose suffix
+// carries more than "<codename>-<network>": ITN2's
+// "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-jammy-mesa-mut-generic" became
+// "…-jammy-mesa-jammy-generic", a tag that does not exist, so extraction 404'd
+// on an image that was sitting in the registry all along.
 func processReleaseString(release string) string {
-	// Split by dashes: e.g., "3.3.0-alpha1-compatible-90ff48c-jammy-devnet"
 	parts := strings.Split(release, "-")
-	
-	if len(parts) < 5 {
-		// If format is unexpected, return as-is
-		return release
+
+	// Search from the end: the codename sits in the suffix, and an earlier
+	// segment could coincidentally match (a branch named "focal", say).
+	for i := len(parts) - 1; i >= 0; i-- {
+		if osCodenames[parts[i]] {
+			parts[i] = "jammy"
+			return strings.Join(parts, "-")
+		}
 	}
-	
-	// Check if the second-to-last part (index len-2) is not "jammy"
-	if parts[len(parts)-2] != "jammy" {
-		// Replace it with "jammy"
-		parts[len(parts)-2] = "jammy"
-	}
-	
-	return strings.Join(parts, "-")
+
+	// No codename found — the tag is not in a shape we understand, so leave it
+	// alone rather than corrupting it.
+	return release
 }
 
 var minaCommitRe = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
