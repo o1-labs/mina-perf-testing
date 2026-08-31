@@ -59,6 +59,16 @@ func (h *InfoExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Same nil dereference as the create handler: a missing experiment_name
+	// panicked here rather than answering 400.
+	if experimentSetup.ExperimentName == nil || *experimentSetup.ExperimentName == "" {
+		writeResponse(w, http.StatusBadRequest, APIResponse{
+			Errors: []string{"experiment_name is required"},
+			Result: "invalid",
+		})
+		return
+	}
+
 	if expName := *experimentSetup.ExperimentName; !h.Store.NameIsUnique(expName) {
 		writeResponse(w, http.StatusBadRequest, APIResponse{
 			Errors: []string{
