@@ -144,5 +144,7 @@ CREATE TABLE IF NOT EXISTS EXPERIMENT_STATE (
   current_step_name varchar,
   warnings text[],
   errors text[],
-  logs text[]
+  logs text[],
+  -- URL the orchestrator POSTs to when orchestration ends (n8n's resume URL)
+  webhook_url varchar
 );
