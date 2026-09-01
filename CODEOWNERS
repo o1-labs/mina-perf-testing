@@ -1,14 +1,14 @@
 # CODEOWNERS - https://docs.github.com/articles/about-code-owners
 #
 # Order matters: the LAST matching pattern wins. Keep the catch-all first,
-# add any narrower path rules below it, and leave /CODEOWNERS last so this
-# file stays pinned to the maintainer group.
+# add any narrower path rules below it, and leave /CODEOWNERS last so the
+# ownership rules themselves stay with the maintainers.
 #
 # Every owner listed here must have write access to the repository,
 # otherwise GitHub silently ignores them and requests no review.
 
 # Default owners for everything in the repository.
-* @deepthiskumar @georgeee @glyh @dkijania @SanabriaRusso
+* @o1-labs/eng
 
-# This file itself.
+# The ownership rules themselves.
 /CODEOWNERS @deepthiskumar @georgeee @glyh @dkijania @SanabriaRusso
