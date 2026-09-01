@@ -5,6 +5,6 @@ set -x
 set -e pipefail
 
 
-if gsutil ls 'gs://testnet-precomputed-blocks/**'; then 
-	gsutil -m rm 'gs://testnet-precomputed-blocks/**' || true
+if gcloud storage ls 'gs://testnet-precomputed-blocks/**'; then 
+	gcloud storage rm 'gs://testnet-precomputed-blocks/**' || true
 fi
