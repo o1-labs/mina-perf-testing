@@ -39,11 +39,10 @@ RUN apt-get update --quiet --yes \
   && rm -rf /var/lib/apt/lists/*
 
 RUN echo "downloading mina" \
-  && echo "deb [trusted=yes] http://packages.o1test.net jammy umt" > /etc/apt/sources.list.d/mina.list \
+  && echo "deb [trusted=yes] http://packages.o1test.net jammy alpha" > /etc/apt/sources.list.d/mina.list \
   && apt-get update --quiet --yes \
   && apt-get install --quiet --yes --allow-downgrades \
-    mina-mesa-mut=4.0.0-rc1-83b4654 \
-    mina-mesa-mut-config=4.0.0-rc1-83b4654 \
+    mina-devnet=4.0.0-6965b50 \
   && rm -rf /var/lib/apt/lists/*
 
 ENTRYPOINT [ "/bin/sh", "-c", "/orchestrator_service -conn \"$PSQL_CONNECTION_STRING\" -config \"$CONFIG\" -address \":9090\"" ]
