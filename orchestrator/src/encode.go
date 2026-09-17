@@ -72,7 +72,7 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 	step := 0
 	var prevAction BatchAction
 	var actionAccum []ActionIO
-	var batchStartStep int // Track the starting step of current batch
+	var batchStartStep int         // Track the starting step of current batch
 	var preBatchComments []string  // Comments to print before current batch executes
 	var postBatchComments []string // Comments accumulated after batch started
 
