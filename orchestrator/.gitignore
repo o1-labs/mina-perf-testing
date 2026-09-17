@@ -3,9 +3,10 @@ bazel-*
 user.bazelrc
 
 # make stuff
-result/
-generator
-orchestrator
+/result/
+/generator
+/orchestrator
+/orchestrator_service
 
 # Binaries for programs and plugins
 *.exe
