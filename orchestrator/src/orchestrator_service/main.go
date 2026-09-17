@@ -98,7 +98,7 @@ func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.St
 		config.MinaExec = minaExecPath
 		log.Infof("Using extracted Mina executable: %s", minaExecPath)
 	}
-	
+
 	if err := lib.RunExperiment(inDecoder, config, log); err != nil {
 		var orchErr *lib.OrchestratorError
 		var ok bool
