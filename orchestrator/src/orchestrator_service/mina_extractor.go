@@ -201,6 +201,8 @@ func getImageManifest(token, dockerImage string, log logging.StandardLogger) (*M
 
 	manifestURL := fmt.Sprintf("https://europe-west3-docker.pkg.dev/v2/%s/manifests/%s", repo, tag)
 
+	log.Infof("Fetching image manifest: url=%s tag=%s", manifestURL, tag)
+
 	req, err := http.NewRequest("GET", manifestURL, nil)
 	if err != nil {
 		return nil, err
@@ -217,7 +219,7 @@ func getImageManifest(token, dockerImage string, log logging.StandardLogger) (*M
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("manifest request failed with status: %s", resp.Status)
+		return nil, fmt.Errorf("manifest request failed with status: %s (url=%s, tag=%s)", resp.Status, manifestURL, tag)
 	}
 
 	var manifest Manifest

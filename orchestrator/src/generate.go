@@ -254,7 +254,11 @@ func SampleTps(baseTps, stressTps float64) float64 {
 
 func SampleStopRatio(minRatio, maxRatio float64) float64 {
 	stddev := (maxRatio - minRatio) / 3
-	return stddev*math.Abs(gaussRandom()) + minRatio
+	r := stddev*math.Abs(gaussRandom()) + minRatio
+	if r > maxRatio {
+		return maxRatio
+	}
+	return r
 }
 
 func genStopDaemon(useRestartScript bool, nodesRef int, nodesName string, clean bool) GeneratedCommand {
