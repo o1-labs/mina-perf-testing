@@ -40,22 +40,22 @@ type Layer struct {
 // getLatestDeploymentRelease queries the database for the latest deployment release
 func getLatestDeploymentRelease(db *gorm.DB) (string, error) {
 	var release sql.NullString
-	
+
 	err := db.Raw(`
 		SELECT metadata_json->>'release' as release
 		FROM deployment
 		ORDER BY deployment_id DESC
 		LIMIT 1
 	`).Scan(&release).Error
-	
+
 	if err != nil {
 		return "", fmt.Errorf("failed to query deployment release: %w", err)
 	}
-	
+
 	if !release.Valid || release.String == "" {
 		return "", fmt.Errorf("no release found in deployment metadata")
 	}
-	
+
 	return release.String, nil
 }
 
@@ -122,33 +122,33 @@ func getMinaExecutablePath(db *gorm.DB, log logging.StandardLogger) (string, err
 	if err != nil {
 		return "", fmt.Errorf("failed to get deployment release: %w", err)
 	}
-	
+
 	// Process the release string to ensure jammy
 	processedRelease := processReleaseString(release)
-	
+
 	// Create cache directory if it doesn't exist
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create cache directory: %w", err)
 	}
-	
+
 	// Check if executable is already cached
 	executableName := fmt.Sprintf("mina-%s", processedRelease)
 	executablePath := filepath.Join(cacheDir, executableName)
-	
+
 	if _, err := os.Stat(executablePath); err == nil {
 		// Executable already exists in cache
 		log.Infof("Using cached Mina executable: %s", executableName)
 		return filepath.Abs(executablePath)
 	}
-	
+
 	// Extract executable from Docker image
 	dockerImage := fmt.Sprintf("europe-west3-docker.pkg.dev/o1labs-192920/euro-docker-repo/mina-daemon:%s", processedRelease)
 	log.Infof("Extracting Mina executable from Docker image: %s", dockerImage)
-	
+
 	if err := extractMinaBinary(dockerImage, executablePath, log); err != nil {
 		return "", fmt.Errorf("failed to extract mina binary: %w", err)
 	}
-	
+
 	return filepath.Abs(executablePath)
 }
 
@@ -193,7 +193,7 @@ func extractMinaBinary(dockerImage, outputFile string, log logging.StandardLogge
 			if err := os.Chmod(outputFile, 0755); err != nil {
 				return fmt.Errorf("failed to make binary executable: %w", err)
 			}
-			
+
 			log.Infof("Successfully extracted mina binary to: %s", outputFile)
 			return nil
 		}
@@ -204,7 +204,7 @@ func extractMinaBinary(dockerImage, outputFile string, log logging.StandardLogge
 
 func getRegistryToken(log logging.StandardLogger) (string, error) {
 	tokenURL := "https://europe-west3-docker.pkg.dev/v2/token?service=europe-west3-docker.pkg.dev&scope=repository:o1labs-192920/euro-docker-repo/mina-daemon:pull"
-	
+
 	resp, err := http.Get(tokenURL)
 	if err != nil {
 		return "", err
@@ -276,7 +276,7 @@ func processLayer(token, digest, tempDir string, layerNum int, outputFile, docke
 	parts := strings.Split(dockerImage, ":")
 	repository := parts[0]
 	repo := strings.TrimPrefix(repository, "europe-west3-docker.pkg.dev/")
-	
+
 	// Download layer
 	blobURL := fmt.Sprintf("https://europe-west3-docker.pkg.dev/v2/%s/blobs/%s", repo, digest)
 	layerFile := filepath.Join(tempDir, fmt.Sprintf("layer_%d.tar.gz", layerNum))
@@ -329,7 +329,7 @@ func extractLayer(layerFile, outputFile string, log logging.StandardLogger) (boo
 
 	// Try to detect if it's gzipped by reading magic bytes
 	var reader io.Reader = file
-	
+
 	file.Seek(0, 0)
 	header := make([]byte, 2)
 	if n, _ := file.Read(header); n == 2 && header[0] == 0x1f && header[1] == 0x8b {
@@ -361,7 +361,7 @@ func extractLayer(layerFile, outputFile string, log logging.StandardLogger) (boo
 		if header.Name == targetPath || strings.HasSuffix(header.Name, "/"+targetPath) {
 			if header.Typeflag == tar.TypeReg {
 				log.Infof("Found mina binary in layer at path: %s", header.Name)
-				
+
 				outFile, err := os.Create(outputFile)
 				if err != nil {
 					return false, fmt.Errorf("failed to create output file: %w", err)
