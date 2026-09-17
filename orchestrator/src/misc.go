@@ -204,8 +204,19 @@ func (SampleAction) Name() string { return "sample" }
 var _ Action = SampleAction{}
 
 func selectNodes(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddress) {
+	if len(nodes) == 0 {
+		return tps, nodes // Return empty slice if no nodes available
+	}
+	
 	nodesF := math.Floor(tps / minTps)
 	nodesMax := int(nodesF)
+	
+	// Ensure we always select at least one node if nodes are available
+	if nodesMax == 0 && len(nodes) > 0 {
+		nodesMax = 1
+		nodesF = 1.0
+	}
+	
 	if nodesMax >= len(nodes) {
 		return tps / float64(len(nodes)), nodes
 	}

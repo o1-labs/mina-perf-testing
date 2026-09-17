@@ -70,6 +70,12 @@ func ZkappKeygenRequirements(initZkappBalance uint64, params ZkappSubParams) (in
 	txCost := params.MaxBalanceChange*8 + params.MaxFee
 	totalTxs := uint64(math.Ceil(float64(params.DurationMin) * 60 * params.Tps))
 	balance := uint64(keys)*zkappsToDeployPerKey*(initZkappBalance+params.DeploymentFee)*2 + 3*txCost*totalTxs
+	
+	// Add funding fees for account creation (1 MINA per account by default)
+	// This ensures we have enough funds to cover both the account balances AND the creation fees
+	fundingFees := uint64(keys) * 1e9 // 1 MINA per account creation
+	balance += fundingFees
+	
 	return keys, balance
 }
 
@@ -124,6 +130,10 @@ func SendZkappCommands(config Config, params ZkappCommandParams, output func(Sch
 		return errors.New("no nodes specified")
 	}
 	tps, nodes := selectNodes(params.Tps, params.MinTps, params.Nodes)
+	if len(nodes) == 0 {
+		return fmt.Errorf("no nodes selected for zkapp execution (tps=%.6f, minTps=%.6f, available nodes=%d)", 
+			params.Tps, params.MinTps, len(params.Nodes))
+	}
 	feePayersPerNode := len(params.FeePayers) / len(nodes)
 	successfulNodes := make([]NodeAddress, 0, len(nodes))
 	remTps := params.Tps

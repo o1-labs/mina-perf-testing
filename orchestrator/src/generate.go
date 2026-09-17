@@ -9,8 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"gorm.io/datatypes"
 )
 
 type GenParams struct {
@@ -26,7 +24,7 @@ type GenParams struct {
 	RotationKeys, RotationServers                                        []string
 	RotationPermutation                                                  bool
 	RotationRatio                                                        float64
-	MixMaxCostTpsRatio                                                   float64
+	MaxCostMixedTpsRatio                                                 float64
 	LargePauseEveryNRounds, LargePauseMin                                int
 	MinBalanceChange, MaxBalanceChange, DeploymentFee                    uint64
 	PaymentAmount, MinZkappFee, MaxZkappFee, FundFee                     uint64
@@ -34,20 +32,12 @@ type GenParams struct {
 	ZkappSoftLimit                                                       int
 }
 
-func (p *GenParams) ToJSON() (datatypes.JSON, error) {
-	data, err := json.Marshal(p)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to marshal setup to JSON: %v", err)
-	}
-	return data, nil
-}
-
 func DefaultGenParams() GenParams {
 	return GenParams{
 		MinTps:                 0.01,
 		BaseTps:                0.3,
 		StressTps:              1,
-		SenderRatio:            0.5,
+		SenderRatio:            1,
 		ZkappRatio:             0.5,
 		NewAccountRatio:        0,
 		StopCleanRatio:         0.1,
@@ -56,7 +46,7 @@ func DefaultGenParams() GenParams {
 		RoundDurationMin:       30,
 		PauseMin:               15,
 		Rounds:                 4,
-		StopsPerRound:          2,
+		StopsPerRound:          0,
 		Gap:                    180,
 		SendFromNonBpsOnly:     false,
 		StopOnlyBps:            false,
@@ -66,14 +56,14 @@ func DefaultGenParams() GenParams {
 		PasswordEnv:            "",
 		FundKeyPrefix:          "./fund_keys",
 		Privkeys:               []string{},
-		PaymentReceiver:        "B62qn7v4x5g3Z1h8k2j6f9c5z5v5v5v5v5v5v5v5v5v5v5v5v5",
-		PrivkeysPerFundCmd:     1,
+		PaymentReceiver:        "B62qiy32p8kAKnny8ZFwoMhYpBppM1DWVCqAPBYNcXnsAHhnfAAuXgg",
+		PrivkeysPerFundCmd:     2,
 		GenerateFundKeys:       20,
 		RotationKeys:           []string{},
 		RotationServers:        []string{},
 		RotationPermutation:    false,
 		RotationRatio:          0.3,
-		MixMaxCostTpsRatio:     0.0,
+		MaxCostMixedTpsRatio:   0.0,
 		LargePauseEveryNRounds: 8,
 		LargePauseMin:          0,
 		MinBalanceChange:       0,
@@ -103,6 +93,7 @@ type GeneratedRound struct {
 	Commands           []GeneratedCommand
 	PaymentFundCommand *FundParams
 	ZkappFundCommand   *FundParams
+	RoundInfo          RoundInfo
 }
 
 func withComment(comment string, cmd GeneratedCommand) GeneratedCommand {
@@ -312,16 +303,43 @@ func except(groupRef int, groupName string, exceptRef int, exceptName string) Ge
 		Except: except,
 	}}
 }
+
+func roundInfo(paymentParams PaymentSubParams, zkappParams ZkappSubParams, onlyPayments bool, onlyZkapps bool, roundDurationMin int) RoundInfo {
+	// Calculate round information
+	var paymentCount, zkappCount int
+	var paymentTps, zkappTps_ float64
+	var maxCost_ bool
+
+	if !onlyZkapps {
+		paymentCount = int(paymentParams.Tps * float64(paymentParams.DurationMin) * 60)
+		paymentTps = paymentParams.Tps
+	}
+	if !onlyPayments {
+		zkappCount = int(zkappParams.Tps * float64(zkappParams.DurationMin) * 60)
+		zkappTps_ = zkappParams.Tps
+		maxCost_ = zkappParams.MaxCost
+	}
+
+	return RoundInfo{
+		PaymentCount:    paymentCount,
+		ZkappCount:      zkappCount,
+		PaymentTps:      paymentTps,
+		ZkappTps:        zkappTps_,
+		DurationMinutes: roundDurationMin,
+		MaxCost:         maxCost_,
+	}
+}
+
 func (p *GenParams) Generate(round int) GeneratedRound {
 	zkappsKeysDir := fmt.Sprintf("%s/%s/round-%d/zkapps", p.FundKeyPrefix, p.ExperimentName, round)
 	paymentsKeysDir := fmt.Sprintf("%s/%s/round-%d/payments", p.FundKeyPrefix, p.ExperimentName, round)
 	tps := SampleTps(p.BaseTps, p.StressTps)
 	maxCost := p.MaxCost
 	zkappRatio := p.ZkappRatio
-	if p.MixMaxCostTpsRatio > 1e-3 && (round&1) == 1 {
+	if p.MaxCostMixedTpsRatio > 1e-3 && (round&1) == 1 {
 		maxCost = true
 		zkappRatio = 1
-		tps *= p.MixMaxCostTpsRatio
+		tps *= p.MaxCostMixedTpsRatio
 	}
 	experimentName := fmt.Sprintf("%s-%d", p.ExperimentName, round)
 	onlyZkapps := math.Abs(1-zkappRatio) < 1e-3
@@ -470,7 +488,8 @@ func (p *GenParams) Generate(round int) GeneratedRound {
 			cmds = append(cmds, withComment(comment3, waitMin(p.LargePauseMin)))
 		}
 	}
-	res := GeneratedRound{Commands: cmds}
+
+	res := GeneratedRound{Commands: cmds, RoundInfo: roundInfo(paymentParams, zkappParams, onlyPayments, onlyZkapps, p.RoundDurationMin)}
 	if !onlyPayments {
 		_, _, _, initBalance := ZkappBalanceRequirements(zkappTps, zkappParams)
 		zkappKeysNum, zkappAmount := ZkappKeygenRequirements(initBalance, zkappParams)

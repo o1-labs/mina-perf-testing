@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -10,7 +9,7 @@ import (
 	lib "itn_orchestrator"
 )
 
-const mixMaxCostTpsRatioHelp = "when provided, specifies ratio of tps (proportional to total tps) for max cost transactions to be used every other round, zkapps ratio for these rounds is set to 100%"
+const maxCostMixedTpsRatioHelp = "when provided, specifies ratio of tps (proportional to total tps) for max cost transactions to be used every other round, zkapps ratio for these rounds is set to 100%"
 
 func main() {
 	var rotateKeys, rotateServers string
@@ -50,7 +49,7 @@ func main() {
 	flag.BoolVar(&p.RotationPermutation, "rotate-permutation", defaults.RotationPermutation, "Whether to generate only permutation mappings for rotation")
 	flag.IntVar(&p.LargePauseMin, "large-pause", defaults.LargePauseMin, "duration of the large pause, minutes")
 	flag.IntVar(&p.LargePauseEveryNRounds, "large-pause-every", defaults.LargePauseEveryNRounds, "number of rounds in between large pauses")
-	flag.Float64Var(&p.MixMaxCostTpsRatio, "max-cost-mixed", defaults.MixMaxCostTpsRatio, mixMaxCostTpsRatioHelp)
+	flag.Float64Var(&p.MaxCostMixedTpsRatio, "max-cost-mixed", defaults.MaxCostMixedTpsRatio, maxCostMixedTpsRatioHelp)
 	flag.Uint64Var(&p.MaxBalanceChange, "max-balance-change", defaults.MaxBalanceChange, "Max balance change for zkapp account update")
 	flag.Uint64Var(&p.MinBalanceChange, "min-balance-change", defaults.MinBalanceChange, "Min balance change for zkapp account update")
 	flag.Uint64Var(&p.DeploymentFee, "deployment-fee", defaults.DeploymentFee, "Zkapp deployment fee")
@@ -91,23 +90,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	encoder := json.NewEncoder(os.Stdout)
-	writeComment := func(comment string) {
-		if err := encoder.Encode(comment); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing comment: %v\n", err)
-			os.Exit(3)
-		}
+	if _, err := lib.EncodeToWriter(&p, os.Stdout, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding: %v\n", err)
+		os.Exit(3)
 	}
-
-	writeCommand := func(cmd lib.GeneratedCommand) {
-		comment := cmd.Comment()
-		if comment != "" {
-			writeComment(comment)
-		}
-		if err := encoder.Encode(cmd); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing command: %v\n", err)
-			os.Exit(3)
-		}
-	}
-	lib.Encode(&p, writeCommand, writeComment)
 }

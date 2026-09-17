@@ -36,6 +36,12 @@ func PaymentKeygenRequirements(gap int, params PaymentSubParams) (int, uint64) {
 	totalTxs := uint64(math.Ceil(float64(params.DurationMin) * 60 * params.Tps))
 	balance := 3 * txCost * totalTxs
 	keys := maxParticipants + int(tpsGap)*2
+	
+	// Add funding fees for account creation (1 MINA per account by default)
+	// This ensures we have enough funds to cover both the account balances AND the creation fees
+	fundingFees := uint64(keys) * 1e9 // 1 MINA per account creation
+	balance += fundingFees
+	
 	return keys, balance
 }
 
@@ -63,6 +69,10 @@ func schedulePaymentsDo(config Config, params PaymentSubParams, nodeAddress Node
 
 func SchedulePayments(config Config, params PaymentParams, output func(ScheduledPaymentsReceipt)) error {
 	tps, nodes := selectNodes(params.Tps, params.MinTps, params.Nodes)
+	if len(nodes) == 0 {
+		return fmt.Errorf("no nodes selected for payment execution (tps=%.6f, minTps=%.6f, available nodes=%d)", 
+			params.Tps, params.MinTps, len(params.Nodes))
+	}
 	feePayersPerNode := len(params.FeePayers) / len(nodes)
 	successfulNodes := make([]NodeAddress, 0, len(nodes))
 	remTps := params.Tps
