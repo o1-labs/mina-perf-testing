@@ -24,3 +24,7 @@ orchestrator
 # vendor/
 
 graphql_generated.go
+
+# Local key material - never commit
+keys/
+fund-keys/
