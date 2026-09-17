@@ -1,0 +1,17 @@
+# CODEOWNERS - https://docs.github.com/articles/about-code-owners
+#
+# Owners are listed individually rather than as @o1-labs/eng on purpose:
+# a team owner makes GitHub request review from the entire team, while
+# naming people pings exactly this group.
+#
+# Order matters: the LAST matching pattern wins. Keep the catch-all first,
+# add any narrower path rules below it, and leave /CODEOWNERS last.
+#
+# Every owner listed here must have write access to the repository,
+# otherwise GitHub silently ignores them and requests no review.
+
+# Default owners for everything in the repository.
+* @deepthiskumar @georgeee @glyh @dkijania @SanabriaRusso
+
+# The ownership rules themselves.
+/CODEOWNERS @deepthiskumar @georgeee @glyh @dkijania @SanabriaRusso
