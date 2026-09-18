@@ -27,4 +27,6 @@ graphql_generated.go
 
 # Local key material - never commit
 keys/
+keys/
+fund_keys/
 fund-keys/
