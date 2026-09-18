@@ -3,7 +3,9 @@
 # `COPY . .`, so without this file any keys present would be baked into the
 # builder layer of a locally built image.
 keys/
-fund-keys/
+**/keys/
+**/fund_keys/
+**/fund-keys/
 
 # Build outputs. The image rebuilds these itself; copying them in only risks
 # shipping a stale host-built binary.
