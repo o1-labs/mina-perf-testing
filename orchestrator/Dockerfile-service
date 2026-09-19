@@ -38,6 +38,16 @@ RUN apt-get update --quiet --yes \
     libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 
+# The bundled client is a fallback only — the service takes its mina from the
+# deployed daemon image at run time (see mina_extractor.go), which is the sole
+# way the client and the daemon are guaranteed to be the same build.
+#
+# The pin must name a package that actually exists. mina-mesa-mut at
+# 4.0.0-rc1-mesa-mut-d7513d4 has no matching mina-mesa-mut-config in
+# packages.o1test.net jammy/umt, so that pin cannot be built at all. It was
+# replaced by mina-devnet 4.0.0-6965b50 from jammy/alpha, which does ship a
+# matching -config. (mina-mesa-mut 4.0.0-rc1-83b4654 is a buildable pair too,
+# but only in the umt component, not alpha.)
 RUN echo "downloading mina" \
   && echo "deb [trusted=yes] http://packages.o1test.net jammy alpha" > /etc/apt/sources.list.d/mina.list \
   && apt-get update --quiet --yes \

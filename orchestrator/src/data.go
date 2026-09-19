@@ -56,6 +56,9 @@ type Config struct {
 	FundDaemonPorts    []string
 	UrlOverrides       []string
 	PrintRequests      bool
+
+	// AllowUnverifiedMinaExec — see OrchestratorConfig.
+	AllowUnverifiedMinaExec bool
 }
 
 type OutputF = func(name string, value any, multiple bool, sensitive bool) error

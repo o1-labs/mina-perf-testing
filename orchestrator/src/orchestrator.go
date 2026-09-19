@@ -86,6 +86,15 @@ type OrchestratorConfig struct {
 	ControlExec      string   `json:",omitempty"`
 	UrlOverrides     []string `json:",omitempty"`
 	PrintRequests    bool     `json:"printRequests,omitempty"`
+
+	// AllowUnverifiedMinaExec permits an experiment to run with a mina client
+	// that was not taken from the deployed daemon image. Off by default: an
+	// orchestrator and a daemon built from different Mina commits do not fail,
+	// they hang — the daemon cannot bin_prot-decode Send_zkapp_commands and
+	// fund-keys retries every two minutes forever, reporting nothing. Turn it
+	// on only when the deployed image is somewhere the extractor cannot read,
+	// and expect to verify the pairing by hand.
+	AllowUnverifiedMinaExec bool `json:"allowUnverifiedMinaExec,omitempty"`
 }
 
 func (config *AwsConfig) GetBucketName() string {
@@ -229,6 +238,8 @@ func SetupConfig(ctx context.Context, orchestratorConfig OrchestratorConfig, log
 		OnlineURL:        orchestratorConfig.OnlineURL,
 		UrlOverrides:     orchestratorConfig.UrlOverrides,
 		PrintRequests:    orchestratorConfig.PrintRequests,
+
+		AllowUnverifiedMinaExec: orchestratorConfig.AllowUnverifiedMinaExec,
 	}
 	if config.MinaExec == "" {
 		config.MinaExec = "mina"

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	lib "itn_orchestrator"
 	"log"
@@ -27,7 +28,12 @@ const (
 )
 
 type ExperimentState struct {
-	Name            string           `json:"name"`
+	// Name is the primary key in 001-init-schema.sql. Declaring it here too is
+	// what keeps AutoMigrate alive: without the tag GORM believes the table has
+	// no key, tries to make the column nullable, and Postgres rejects that with
+	// SQLSTATE 42P16 — aborting the whole migration before any later column is
+	// considered.
+	Name            string           `gorm:"primaryKey" json:"name"`
 	Description     string           `json:"description"`
 	CreatedAt       time.Time        `json:"created_at"`
 	UpdatedAt       time.Time        `json:"updated_at"`
@@ -63,8 +69,44 @@ func NewStore(db *gorm.DB) *Store {
 	} else {
 		log.Printf("Auto-migration completed successfully")
 	}
-	return &Store{
+	store := &Store{
 		DB: db,
+	}
+	store.reconcileInterruptedExperiments()
+	return store
+}
+
+// reconcileInterruptedExperiments closes out experiments the previous process
+// was driving when it stopped.
+//
+// A worker never survives a restart, so any row still `running` or `cancelling`
+// at startup is being driven by nobody. Leaving those rows alone made a pod
+// restart an amnesia trick: the in-memory slot came back free and the run
+// history kept a row that claimed to be in progress forever. Marking them
+// terminal here is what makes a restart a real recovery — and it is also the
+// only record that a run was lost, since the process that knew about it is gone.
+// This runs as one UPDATE rather than a read-modify-write loop, because
+// ExperimentState cannot be read back through GORM at all: Setup is a
+// lib.GenParams, which implements no sql.Scanner, so any SELECT into the struct
+// fails with "unsupported Scan, storing driver.Value type []uint8". The same
+// reason updateExperimentInDB marshals Setup by hand on the way out.
+func (s *Store) reconcileInterruptedExperiments() {
+	const note = "Experiment interrupted: the orchestrator restarted while this run was in progress"
+
+	result := s.DB.Exec(`
+		UPDATE experiment_state
+		SET status = 'error',
+		    ended_at = now(),
+		    updated_at = now(),
+		    errors = array_append(coalesce(errors, ARRAY[]::text[]), ?)
+		WHERE status IN (?, ?)`, note, string(Running), string(Cancelling))
+	if result.Error != nil {
+		log.Printf("Error closing out interrupted experiments: %v", result.Error)
+		return
+	}
+	if result.RowsAffected > 0 {
+		log.Printf("Closed out %d experiment(s) left in progress when the orchestrator last stopped",
+			result.RowsAffected)
 	}
 }
 
@@ -143,45 +185,118 @@ func (s *Store) AtomicGet() *ExperimentState {
 	return s.experiment
 }
 
+// markEnded stamps the end time with the wall clock. It exists because the
+// obvious `experiment.EndedAt = &time.Time{}` takes the address of the *zero*
+// time, which is how finished experiments came to report an ended_at of
+// 0001-01-01 00:00:00.
+func markEnded(experiment *ExperimentState) {
+	now := time.Now()
+	experiment.EndedAt = &now
+}
+
+// detachWorker records that no goroutine is driving the experiment any more.
+// Cancel relies on this to tell "winding down" from "nothing left to wind
+// down"; without it a cancel with no worker attached parks in `cancelling`
+// forever and only a pod restart clears it. Caller must hold s.mu.
+func (s *Store) detachWorker() {
+	s.cancel = nil
+}
+
 // FinishWithError sets the experiment status to "error" and appends the error message
 func (s *Store) FinishWithError(err *lib.OrchestratorError) *ExperimentState {
-	return s.AtomicSet(func(experiment *ExperimentState) {
+	experiment := s.AtomicSet(func(experiment *ExperimentState) {
 		experiment.Status = "error"
 		experiment.Errors = append(experiment.Errors, err.Message)
-		experiment.EndedAt = &time.Time{}
+		markEnded(experiment)
 	})
+	s.mu.Lock()
+	s.detachWorker()
+	s.mu.Unlock()
+	return experiment
 }
 
 // FinishWithSuccess sets the experiment status to "success" and marks it as completed
 func (s *Store) FinishWithSuccess() *ExperimentState {
-	return s.AtomicSet(func(experiment *ExperimentState) {
+	experiment := s.AtomicSet(func(experiment *ExperimentState) {
 		experiment.Status = "success"
-		experiment.EndedAt = &time.Time{}
+		markEnded(experiment)
 	})
+	s.mu.Lock()
+	s.detachWorker()
+	s.mu.Unlock()
+	return experiment
 }
 
-// Add sets the single job if none is running
+// ErrExperimentRunning reports that the single-experiment slot is taken. It is
+// a sentinel so the HTTP layer can answer 409 for a held slot and 500 for a
+// failed write, which used to be indistinguishable at the call site.
+var ErrExperimentRunning = errors.New("an experiment is already running")
+
+// holdsSlot reports whether the in-memory experiment still occupies the single
+// experiment slot. Cancelling counts: a run being wound down is not finished,
+// and starting another one alongside it would have two orchestrators driving
+// the same network. Caller must hold s.mu.
+func (s *Store) holdsSlot() bool {
+	if s.experiment == nil {
+		return false
+	}
+	return s.experiment.Status == Running || s.experiment.Status == Cancelling
+}
+
+// Add claims the single experiment slot and persists the experiment.
+//
+// The write happens under the same lock as the claim, and a failed write
+// releases the claim. Previously the claim was made first and the write ran
+// afterwards in the handler: when the write failed — as it did for every
+// experiment while `webhook_url` was missing from the schema — the slot stayed
+// held by a run that existed nowhere but in this process's memory, and no
+// cancel could reach it. One such lock was held for 14 days.
 func (s *Store) Add(experiment *ExperimentState, cancel context.CancelFunc) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.experiment != nil && s.experiment.Status == "running" {
-		return fmt.Errorf("an experiment is already running")
+	if s.holdsSlot() {
+		return fmt.Errorf("%w: %q, started %s ago, at step %d (%s)",
+			ErrExperimentRunning, s.experiment.Name,
+			time.Since(s.experiment.CreatedAt).Truncate(time.Second),
+			s.experiment.CurrentStepNo, s.experiment.CurrentStepName)
+	}
+	if err := s.WriteExperimentToDB(*experiment); err != nil {
+		return fmt.Errorf("failed to write experiment to database: %w", err)
 	}
 	s.experiment = experiment
 	s.cancel = cancel
 	return nil
 }
 
-// Cancel stops the running job
+// Cancel stops the running job.
+//
+// Cancel is terminal in both directions. With a worker attached it asks the
+// worker to stop and leaves the experiment `cancelling` — the worker moves it
+// on when it unwinds. With no worker attached there is nothing left to unwind,
+// so the experiment goes straight to `cancelled` rather than waiting on a
+// goroutine that already exited.
 func (s *Store) Cancel() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.experiment == nil {
-		return fmt.Errorf("not experiment running")
+	if !s.holdsSlot() {
+		return fmt.Errorf("no experiment running")
+	}
+
+	if s.cancel == nil {
+		s.experiment.Status = Cancelled
+		s.experiment.UpdatedAt = time.Now()
+		markEnded(s.experiment)
+		if err := s.updateExperimentInDB(s.experiment); err != nil {
+			log.Printf("Error persisting cancelled experiment: %v", err)
+		}
+		return nil
 	}
 
 	s.experiment.Status = Cancelling
 	s.experiment.UpdatedAt = time.Now()
+	if err := s.updateExperimentInDB(s.experiment); err != nil {
+		log.Printf("Error persisting cancelling experiment: %v", err)
+	}
 	s.cancel()
 	return nil
 }
