@@ -22,6 +22,7 @@ type GeneratorInputData struct {
 	StopOnlyBps            *bool                         `json:"stop_only_bps,omitempty"`
 	UseRestartScript       *bool                         `json:"use_restart_script,omitempty"`
 	MaxCost                *bool                         `json:"max_cost,omitempty"`
+	NonDefaultToken        *bool                         `json:"non_default_token,omitempty"`
 	RoundDurationMin       *int                          `json:"round_duration_min,omitempty"`
 	PauseMin               *int                          `json:"pause_min,omitempty"`
 	Rounds                 *int                          `json:"rounds,omitempty"`
@@ -76,6 +77,7 @@ func (inputData *GeneratorInputData) ApplyWithDefaults(p *lib.GenParams) {
 	lib.SetOrDefault(inputData.StopOnlyBps, &p.StopOnlyBps, defaults.StopOnlyBps)
 	lib.SetOrDefault(inputData.UseRestartScript, &p.UseRestartScript, defaults.UseRestartScript)
 	lib.SetOrDefault(inputData.MaxCost, &p.MaxCost, defaults.MaxCost)
+	lib.SetOrDefault(inputData.NonDefaultToken, &p.NonDefaultToken, defaults.NonDefaultToken)
 	lib.SetOrDefault(inputData.RoundDurationMin, &p.RoundDurationMin, defaults.RoundDurationMin)
 	lib.SetOrDefault(inputData.PauseMin, &p.PauseMin, defaults.PauseMin)
 	lib.SetOrDefault(inputData.Rounds, &p.Rounds, defaults.Rounds)

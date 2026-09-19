@@ -16,6 +16,7 @@ type GenParams struct {
 	StopCleanRatio, MinStopRatio, MaxStopRatio                           float64
 	RoundDurationMin, PauseMin, Rounds, StopsPerRound, Gap               int
 	SendFromNonBpsOnly, StopOnlyBps, UseRestartScript, MaxCost           bool
+	NonDefaultToken                                                      bool
 	ExperimentName, PasswordEnv, FundKeyPrefix                           string
 	Privkeys                                                             []string
 	PaymentReceiver                                                      itn_json_types.MinaPublicKey
@@ -52,6 +53,7 @@ func DefaultGenParams() GenParams {
 		StopOnlyBps:            false,
 		UseRestartScript:       false,
 		MaxCost:                false,
+		NonDefaultToken:        false,
 		ExperimentName:         "exp-0",
 		PasswordEnv:            "",
 		FundKeyPrefix:          "./fund_keys",
@@ -312,7 +314,7 @@ func roundInfo(paymentParams PaymentSubParams, zkappParams ZkappSubParams, onlyP
 	// Calculate round information
 	var paymentCount, zkappCount int
 	var paymentTps, zkappTps_ float64
-	var maxCost_ bool
+	var maxCost_, nonDefaultToken_ bool
 
 	if !onlyZkapps {
 		paymentCount = int(paymentParams.Tps * float64(paymentParams.DurationMin) * 60)
@@ -322,6 +324,7 @@ func roundInfo(paymentParams PaymentSubParams, zkappParams ZkappSubParams, onlyP
 		zkappCount = int(zkappParams.Tps * float64(zkappParams.DurationMin) * 60)
 		zkappTps_ = zkappParams.Tps
 		maxCost_ = zkappParams.MaxCost
+		nonDefaultToken_ = zkappParams.NonDefaultToken
 	}
 
 	return RoundInfo{
@@ -331,6 +334,7 @@ func roundInfo(paymentParams PaymentSubParams, zkappParams ZkappSubParams, onlyP
 		ZkappTps:        zkappTps_,
 		DurationMinutes: roundDurationMin,
 		MaxCost:         maxCost_,
+		NonDefaultToken: nonDefaultToken_,
 	}
 }
 
@@ -361,6 +365,7 @@ func (p *GenParams) Generate(round int) GeneratedRound {
 		MaxFee:           p.MaxZkappFee,
 		DeploymentFee:    p.DeploymentFee,
 		MaxCost:          maxCost,
+		NonDefaultToken:  p.NonDefaultToken,
 		NewAccountRatio:  p.NewAccountRatio,
 	}
 	if maxCost {
@@ -424,14 +429,14 @@ func (p *GenParams) Generate(round int) GeneratedRound {
 		participantsRef = -1
 	}
 	if onlyPayments {
-		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: paymentsKeysDir}))
+		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: paymentsKeysDir, PasswordEnv: p.PasswordEnv}))
 		cmds = append(cmds, payments(-1, participantsRef-1, participantsName, paymentParams))
 	} else if onlyZkapps {
-		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: zkappsKeysDir}))
+		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: zkappsKeysDir, PasswordEnv: p.PasswordEnv}))
 		cmds = append(cmds, zkapps(-1, participantsRef-1, participantsName, zkappParams))
 	} else {
-		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: zkappsKeysDir}))
-		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: paymentsKeysDir}))
+		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: zkappsKeysDir, PasswordEnv: p.PasswordEnv}))
+		cmds = append(cmds, loadKeys(KeyloaderParams{Dir: paymentsKeysDir, PasswordEnv: p.PasswordEnv}))
 		cmds = append(cmds, zkapps(-2, participantsRef-2, participantsName, zkappParams))
 		cmds = append(cmds, payments(-2, participantsRef-3, participantsName, paymentParams))
 		cmds = append(cmds, join(-1, "participant", -2, "participant"))
