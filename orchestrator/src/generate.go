@@ -314,7 +314,7 @@ func roundInfo(paymentParams PaymentSubParams, zkappParams ZkappSubParams, onlyP
 	// Calculate round information
 	var paymentCount, zkappCount int
 	var paymentTps, zkappTps_ float64
-	var maxCost_ bool
+	var maxCost_, nonDefaultToken_ bool
 
 	if !onlyZkapps {
 		paymentCount = int(paymentParams.Tps * float64(paymentParams.DurationMin) * 60)
@@ -324,6 +324,7 @@ func roundInfo(paymentParams PaymentSubParams, zkappParams ZkappSubParams, onlyP
 		zkappCount = int(zkappParams.Tps * float64(zkappParams.DurationMin) * 60)
 		zkappTps_ = zkappParams.Tps
 		maxCost_ = zkappParams.MaxCost
+		nonDefaultToken_ = zkappParams.NonDefaultToken
 	}
 
 	return RoundInfo{
@@ -333,6 +334,7 @@ func roundInfo(paymentParams PaymentSubParams, zkappParams ZkappSubParams, onlyP
 		ZkappTps:        zkappTps_,
 		DurationMinutes: roundDurationMin,
 		MaxCost:         maxCost_,
+		NonDefaultToken: nonDefaultToken_,
 	}
 }
 

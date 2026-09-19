@@ -18,6 +18,7 @@ type RoundInfo struct {
 	ZkappTps        float64 `json:"zkapp_tps"`
 	DurationMinutes int     `json:"duration_minutes"`
 	MaxCost         bool    `json:"max_cost"`
+	NonDefaultToken bool    `json:"non_default_token"`
 }
 
 // ExperimentInfo holds information about the entire experiment
