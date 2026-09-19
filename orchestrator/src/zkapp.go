@@ -21,6 +21,7 @@ type ZkappSubParams struct {
 	Gap              int     `json:"gap"`
 	NoPrecondition   bool    `json:"noPrecondition"`
 	MaxCost          bool    `json:"maxCost"`
+	NonDefaultToken  bool    `json:"nonDefaultToken"`
 	MinBalanceChange uint64  `json:"minBalanceChange"`
 	MaxBalanceChange uint64  `json:"maxBalanceChange"`
 	DeploymentFee    uint64  `json:"deploymentFee"`
@@ -99,6 +100,7 @@ func ZkappPaymentsInput(params ZkappSubParams, batchIx int, tps float64) ZkappCo
 		DeploymentFee:      params.DeploymentFee,
 		AccountQueueSize:   accountQueueSize,
 		MaxCost:            params.MaxCost,
+		NonDefaultToken:    params.NonDefaultToken,
 		MaxAccountUpdates:  2,
 	}
 }
