@@ -13,10 +13,33 @@ When creating an experiment via the `/api/v0/experiment/run` endpoint, include a
   "experiment_name": "my-test-experiment",
   "webhook_url": "https://your-server.com/webhook/endpoint",
   "base_tps": 10.0,
-  "rounds": 3,
-  // ... other experiment parameters
+  "rounds": 3
 }
 ```
+
+(plus any other experiment parameters; every field except `experiment_name`
+falls back to its default.)
+
+### Allowed webhook destinations
+
+`webhook_url` is supplied by the caller and the endpoint is unauthenticated, so
+the orchestrator refuses destinations that would turn it into an arbitrary-POST
+primitive inside the cluster:
+
+| destination | accepted |
+|---|---|
+| `https://hooks.slack.com/services/...` | yes |
+| `http://example.com/hook` | yes |
+| `http://10.0.0.5:9200/...` (RFC1918 / RFC4193) | only with `-allow-private-webhooks` |
+| `http://127.0.0.1:...`, `http://localhost:...` | never |
+| `http://169.254.169.254/...` (cloud metadata) | never |
+| any scheme other than `http`/`https` | never |
+
+A host name is checked against every address it resolves to, and redirects are
+not followed, so a public destination cannot bounce the POST to an internal one.
+
+The URL is treated as a credential: it is never returned by
+`GET /api/v0/experiment/status`, and only its scheme and host are logged.
 
 ### 2. Webhook Payload Format
 
