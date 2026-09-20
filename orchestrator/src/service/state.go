@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	lib "itn_orchestrator"
 	"log"
@@ -40,7 +39,12 @@ type ExperimentState struct {
 	Warnings        pq.StringArray   `gorm:"type:text[]" json:"warnings,omitempty"`
 	Errors          pq.StringArray   `gorm:"type:text[]" json:"errors,omitempty"`
 	Logs            pq.StringArray   `gorm:"type:text[]" json:"logs,omitempty"`
-	WebhookURL      string           `json:"webhook_url,omitempty"`
+	// WebhookURL is never serialised to API clients: for Slack, Discord and
+	// Teams the URL *is* the credential, and GET /api/v0/experiment/status
+	// is unauthenticated. Persistence is driven by the gorm tag and by the
+	// explicit column map in updateExperimentInDB, so the DB column is
+	// unaffected by `json:"-"`.
+	WebhookURL string `gorm:"column:webhook_url" json:"-"`
 }
 
 func (ExperimentState) TableName() string {
@@ -54,18 +58,23 @@ type Store struct {
 	cancel     context.CancelFunc
 }
 
-func NewStore(db *gorm.DB) *Store {
-	// Auto-migrate the schema
+// NewStore opens the store and creates experiment_state if it is missing.
+//
+// The error is returned rather than logged because this AutoMigrate is the only
+// thing that creates the table -- load-tests-cluster/init-sql has no DDL for it.
+// If it fails (for example, a role without CREATE), the service would bind and
+// look healthy, and the first POST /run would fail with
+// `relation "experiment_state" does not exist` after Store.Add had already
+// taken the in-process slot. Failing at boot is the honest outcome.
+func NewStore(db *gorm.DB) (*Store, error) {
 	log.Printf("Starting auto-migration for ExperimentState table...")
-	err := db.AutoMigrate(&ExperimentState{})
-	if err != nil {
-		log.Printf("Error auto-migrating ExperimentState table: %v", err)
-	} else {
-		log.Printf("Auto-migration completed successfully")
+	if err := db.AutoMigrate(&ExperimentState{}); err != nil {
+		return nil, fmt.Errorf("auto-migrating ExperimentState table: %w", err)
 	}
+	log.Printf("Auto-migration completed successfully")
 	return &Store{
 		DB: db,
-	}
+	}, nil
 }
 
 func (a *Store) NameIsUnique(name string) bool {
@@ -87,19 +96,17 @@ func (a *Store) WriteExperimentToDB(state ExperimentState) error {
 	return nil
 }
 
+// updateExperimentInDB persists the mutable half of the state.
+//
+// setup_json is deliberately absent: it never changes after creation, and
+// WriteExperimentToDB already writes it once. This function is called from
+// AtomicSet, i.e. once per appended log line, so including it re-marshalled the
+// whole GenParams -- Privkeys and RotationKeys among them -- on every log line.
 func (a *Store) updateExperimentInDB(state *ExperimentState) error {
-	// Convert Setup to JSON bytes to avoid GORM serialization issues
-	setupJSON, err := json.Marshal(state.Setup)
-	if err != nil {
-		log.Printf("Error marshaling setup JSON: %v", err)
-		return err
-	}
-
-	err = a.DB.Model(&ExperimentState{}).Where("name = ?", state.Name).Updates(map[string]interface{}{
+	err := a.DB.Model(&ExperimentState{}).Where("name = ?", state.Name).Updates(map[string]interface{}{
 		"updated_at":        state.UpdatedAt,
 		"ended_at":          state.EndedAt,
 		"status":            state.Status,
-		"setup_json":        string(setupJSON),
 		"current_step_no":   state.CurrentStepNo,
 		"current_step_name": state.CurrentStepName,
 		"warnings":          state.Warnings,
@@ -148,7 +155,7 @@ func (s *Store) FinishWithError(err *lib.OrchestratorError) *ExperimentState {
 	return s.AtomicSet(func(experiment *ExperimentState) {
 		experiment.Status = "error"
 		experiment.Errors = append(experiment.Errors, err.Message)
-		experiment.EndedAt = &time.Time{}
+		experiment.EndedAt = endedNow()
 	})
 }
 
@@ -156,8 +163,28 @@ func (s *Store) FinishWithError(err *lib.OrchestratorError) *ExperimentState {
 func (s *Store) FinishWithSuccess() *ExperimentState {
 	return s.AtomicSet(func(experiment *ExperimentState) {
 		experiment.Status = "success"
-		experiment.EndedAt = &time.Time{}
+		experiment.EndedAt = endedNow()
 	})
+}
+
+// FinishWithCancel marks an experiment the operator asked to stop as cancelled.
+//
+// A cancellation is not a failure: it must not add to Errors and must not fire
+// the error webhook. Without this the context cancellation surfaces as an
+// ordinary error from RunExperiment and the experiment is reported as "error".
+func (s *Store) FinishWithCancel() *ExperimentState {
+	return s.AtomicSet(func(experiment *ExperimentState) {
+		experiment.Status = Cancelled
+		experiment.EndedAt = endedNow()
+	})
+}
+
+// endedNow returns the completion timestamp. It exists because the three
+// Finish* paths previously stored &time.Time{}, so every finished experiment
+// reported ended_at = 0001-01-01T00:00:00Z.
+func endedNow() *time.Time {
+	now := time.Now()
+	return &now
 }
 
 // Add sets the single job if none is running

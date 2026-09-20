@@ -43,7 +43,29 @@ func validateContentLength(r *http.Request, maxSize int64) error {
 	return nil
 }
 
-// parseExperimentSetup parses the experiment setup from request body
+// experimentRequest accepts both request shapes.
+//
+// The canonical body is flat:
+//
+//	{"experiment_name": "exp-1", "rounds": 2, ...}
+//
+// Callers written against the older API wrap the same object in an
+// "experiment_setup" envelope:
+//
+//	{"experiment_setup": {"experiment_name": "exp-1", "rounds": 2, ...}}
+//
+// Both are decoded; the envelope wins when it is present and non-empty, so an
+// existing caller keeps working unchanged. Before this, the envelope decoded
+// into a struct whose fields were all nil and the handlers dereferenced
+// ExperimentName, which panicked instead of returning 400.
+type experimentRequest struct {
+	ExperimentSetup *service_inputs.GeneratorInputData `json:"experiment_setup,omitempty"`
+}
+
+// parseExperimentSetup parses the experiment setup from request body.
+//
+// It guarantees a non-nil ExperimentName on success, so callers may
+// dereference it. An absent or empty name is a 400, never a panic.
 func parseExperimentSetup(r *http.Request) (*service_inputs.GeneratorInputData, error) {
 	// Limit request body size to prevent abuse
 	const maxRequestSize = 1024 * 1024 // 1MB
@@ -51,32 +73,32 @@ func parseExperimentSetup(r *http.Request) (*service_inputs.GeneratorInputData, 
 		return nil, err
 	}
 
-	var experimentSetup service_inputs.GeneratorInputData
-	limitedReader := io.LimitReader(r.Body, maxRequestSize)
-	if err := json.NewDecoder(limitedReader).Decode(&experimentSetup); err != nil {
+	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxRequestSize))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read request body: %v", err)
+	}
+
+	// The envelope and the flat form are decoded from the same bytes. Unknown
+	// keys are ignored by encoding/json, so decoding the flat form out of an
+	// enveloped body simply yields an empty struct, and vice versa.
+	var enveloped experimentRequest
+	if err := json.Unmarshal(body, &enveloped); err != nil {
 		return nil, fmt.Errorf("failed to decode request body: %v", err)
 	}
 
-	return &experimentSetup, nil
-}
+	var flat service_inputs.GeneratorInputData
+	if err := json.Unmarshal(body, &flat); err != nil {
+		return nil, fmt.Errorf("failed to decode request body: %v", err)
+	}
 
-// Legacy API response functions for backward compatibility
-func ValidationError(validationErrors []string, w http.ResponseWriter) {
-	writeResponse(w, http.StatusBadRequest, APIResponse{
-		Errors: validationErrors,
-		Result: "invalid",
-	})
-}
+	experimentSetup := &flat
+	if enveloped.ExperimentSetup != nil {
+		experimentSetup = enveloped.ExperimentSetup
+	}
 
-func Error(errors []string, w http.ResponseWriter) {
-	writeResponse(w, http.StatusBadRequest, APIResponse{
-		Errors: errors,
-		Result: "error",
-	})
-}
+	if experimentSetup.ExperimentName == nil || *experimentSetup.ExperimentName == "" {
+		return nil, fmt.Errorf("experiment_name is required")
+	}
 
-func Success(w http.ResponseWriter) {
-	writeResponse(w, http.StatusOK, APIResponse{
-		Result: "success",
-	})
+	return experimentSetup, nil
 }
