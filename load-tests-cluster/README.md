@@ -135,11 +135,9 @@ Run an experiment:
 curl --location 'http://localhost:9090/api/v0/experiment/run' \
 --header 'Content-Type: application/json' \
 --data '{
-  "experiment_setup": {
-    "priv_keys": ["/keys/plain1"],
-    "payment_receiver": "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i",
-    "experiment_name": "test-experiment-1"
-  }
+  "priv_keys": ["/keys/plain1"],
+  "payment_receiver": "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i",
+  "experiment_name": "test-experiment-1"
 }'
 ```
 
