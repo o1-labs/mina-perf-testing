@@ -4,14 +4,21 @@ import (
 	"fmt"
 	"itn_json_types"
 	lib "itn_orchestrator"
+	"os"
 	"strings"
 )
 
 type GeneratorInputData struct {
-	BaseTps                *float64                      `json:"base_tps,omitempty"`
-	StressTps              *float64                      `json:"stress_tps,omitempty"`
-	MinTps                 *float64                      `json:"min_tps,omitempty"`
-	MaxCostMixedTpsRatio   *float64                      `json:"max_cost_mixed_tps_ratio,omitempty"`
+	BaseTps              *float64 `json:"base_tps,omitempty"`
+	StressTps            *float64 `json:"stress_tps,omitempty"`
+	MinTps               *float64 `json:"min_tps,omitempty"`
+	MaxCostMixedTpsRatio *float64 `json:"max_cost_mixed_tps_ratio,omitempty"`
+	// MixMaxCostTpsRatio is the former name of MaxCostMixedTpsRatio. It is
+	// accepted so that callers written against the old API keep working, and
+	// is used only when max_cost_mixed_tps_ratio is absent.
+	//
+	// Deprecated: send max_cost_mixed_tps_ratio instead.
+	MixMaxCostTpsRatio     *float64                      `json:"mix_max_cost_tps_ratio,omitempty"`
 	MinStopRatio           *float64                      `json:"min_stop_ratio,omitempty"`
 	MaxStopRatio           *float64                      `json:"max_stop_ratio,omitempty"`
 	SenderRatio            *float64                      `json:"sender_ratio,omitempty"`
@@ -66,7 +73,14 @@ func (inputData *GeneratorInputData) ApplyWithDefaults(p *lib.GenParams) {
 	lib.SetOrDefault(inputData.BaseTps, &p.BaseTps, defaults.BaseTps)
 	lib.SetOrDefault(inputData.StressTps, &p.StressTps, defaults.StressTps)
 	lib.SetOrDefault(inputData.MinTps, &p.MinTps, defaults.MinTps)
-	lib.SetOrDefault(inputData.MaxCostMixedTpsRatio, &p.MaxCostMixedTpsRatio, defaults.MaxCostMixedTpsRatio)
+	// The new key wins; the deprecated one is honoured only in its absence.
+	maxCostMixed := inputData.MaxCostMixedTpsRatio
+	if maxCostMixed == nil && inputData.MixMaxCostTpsRatio != nil {
+		maxCostMixed = inputData.MixMaxCostTpsRatio
+		fmt.Fprintln(os.Stderr,
+			"warning: \"mix_max_cost_tps_ratio\" is deprecated, use \"max_cost_mixed_tps_ratio\"")
+	}
+	lib.SetOrDefault(maxCostMixed, &p.MaxCostMixedTpsRatio, defaults.MaxCostMixedTpsRatio)
 	lib.SetOrDefault(inputData.MinStopRatio, &p.MinStopRatio, defaults.MinStopRatio)
 	lib.SetOrDefault(inputData.MaxStopRatio, &p.MaxStopRatio, defaults.MaxStopRatio)
 	lib.SetOrDefault(inputData.SenderRatio, &p.SenderRatio, defaults.SenderRatio)

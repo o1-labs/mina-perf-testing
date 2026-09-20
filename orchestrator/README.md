@@ -201,17 +201,25 @@ Starts a new experiment with the provided setup.
 curl --location 'http://{host}:9090/api/v0/experiment/run' \
 --header 'Content-Type: application/json' \
 --data '{
-  "experiment_setup": {
-        "priv_keys":["/keys/plain1"],
-        "payment_receiver": "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i",
-        "experiment_name":"new_experiment",
-        "zkapp_ratio": 0.3,
-        "stress_tps": 0.5
-  }  
+  "priv_keys":["/keys/plain1"],
+  "payment_receiver": "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i",
+  "experiment_name":"new_experiment",
+  "zkapp_ratio": 0.3,
+  "stress_tps": 0.5
 }'
 ```
 
-Where experiment_setup is complete generator config set.
+The body is the complete generator config. `experiment_name` is required; every
+other field falls back to its default.
+
+The older enveloped form is still accepted, so callers written against the
+previous API keep working:
+
+```json
+{ "experiment_setup": { "experiment_name": "new_experiment", "zkapp_ratio": 0.3 } }
+```
+
+When both are present the envelope wins. New callers should send the flat form.
 
 ### 2. Check Experiment Status
 Retrieves the current status of the running experiment.
@@ -234,13 +242,11 @@ Tests the experiment setup without actually running it.
 curl --location 'http://localhost:9090/api/v0/experiment/test' \
 --header 'Content-Type: application/json' \
 --data '{
-  "experiment_setup": {
-        "priv_keys":["plain1"],
-        "payment_receiver": "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i",
-        "experiment_name":"exp",
-        "zkapp_ratio": 0.3,
-        "stress_tps": 0.5
-  }  
+  "priv_keys":["plain1"],
+  "payment_receiver": "B62qnKweK4BVxG7TA1VzhNr6GcTejXbrN6ycEQiW4ZgUCxHuWTQta4i",
+  "experiment_name":"exp",
+  "zkapp_ratio": 0.3,
+  "stress_tps": 0.5
 }'
 ```
 
