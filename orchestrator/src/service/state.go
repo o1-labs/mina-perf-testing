@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	lib "itn_orchestrator"
@@ -46,7 +45,12 @@ type ExperimentState struct {
 	Warnings        pq.StringArray   `gorm:"type:text[]" json:"warnings,omitempty"`
 	Errors          pq.StringArray   `gorm:"type:text[]" json:"errors,omitempty"`
 	Logs            pq.StringArray   `gorm:"type:text[]" json:"logs,omitempty"`
-	WebhookURL      string           `json:"webhook_url,omitempty"`
+	// WebhookURL is never serialised to API clients: for Slack, Discord and
+	// Teams the URL *is* the credential, and GET /api/v0/experiment/status
+	// is unauthenticated. Persistence is driven by the gorm tag and by the
+	// explicit column map in updateExperimentInDB, so the DB column is
+	// unaffected by `json:"-"`.
+	WebhookURL string `gorm:"column:webhook_url" json:"-"`
 }
 
 func (ExperimentState) TableName() string {
@@ -60,20 +64,25 @@ type Store struct {
 	cancel     context.CancelFunc
 }
 
-func NewStore(db *gorm.DB) *Store {
-	// Auto-migrate the schema
+// NewStore opens the store and creates experiment_state if it is missing.
+//
+// The error is returned rather than logged because this AutoMigrate is the only
+// thing that creates the table -- load-tests-cluster/init-sql has no DDL for it.
+// If it fails (for example, a role without CREATE), the service would bind and
+// look healthy, and the first POST /run would fail with
+// `relation "experiment_state" does not exist` after Store.Add had already
+// taken the in-process slot. Failing at boot is the honest outcome.
+func NewStore(db *gorm.DB) (*Store, error) {
 	log.Printf("Starting auto-migration for ExperimentState table...")
-	err := db.AutoMigrate(&ExperimentState{})
-	if err != nil {
-		log.Printf("Error auto-migrating ExperimentState table: %v", err)
-	} else {
-		log.Printf("Auto-migration completed successfully")
+	if err := db.AutoMigrate(&ExperimentState{}); err != nil {
+		return nil, fmt.Errorf("auto-migrating ExperimentState table: %w", err)
 	}
+	log.Printf("Auto-migration completed successfully")
 	store := &Store{
 		DB: db,
 	}
 	store.reconcileInterruptedExperiments()
-	return store
+	return store, nil
 }
 
 // reconcileInterruptedExperiments closes out experiments the previous process
@@ -129,19 +138,17 @@ func (a *Store) WriteExperimentToDB(state ExperimentState) error {
 	return nil
 }
 
+// updateExperimentInDB persists the mutable half of the state.
+//
+// setup_json is deliberately absent: it never changes after creation, and
+// WriteExperimentToDB already writes it once. This function is called from
+// AtomicSet, i.e. once per appended log line, so including it re-marshalled the
+// whole GenParams -- Privkeys and RotationKeys among them -- on every log line.
 func (a *Store) updateExperimentInDB(state *ExperimentState) error {
-	// Convert Setup to JSON bytes to avoid GORM serialization issues
-	setupJSON, err := json.Marshal(state.Setup)
-	if err != nil {
-		log.Printf("Error marshaling setup JSON: %v", err)
-		return err
-	}
-
-	err = a.DB.Model(&ExperimentState{}).Where("name = ?", state.Name).Updates(map[string]interface{}{
+	err := a.DB.Model(&ExperimentState{}).Where("name = ?", state.Name).Updates(map[string]interface{}{
 		"updated_at":        state.UpdatedAt,
 		"ended_at":          state.EndedAt,
 		"status":            state.Status,
-		"setup_json":        string(setupJSON),
 		"current_step_no":   state.CurrentStepNo,
 		"current_step_name": state.CurrentStepName,
 		"warnings":          state.Warnings,
@@ -225,6 +232,18 @@ func (s *Store) FinishWithSuccess() *ExperimentState {
 	s.detachWorker()
 	s.mu.Unlock()
 	return experiment
+}
+
+// FinishWithCancel marks an experiment the operator asked to stop as cancelled.
+//
+// A cancellation is not a failure: it must not add to Errors and must not fire
+// the error webhook. Without this the context cancellation surfaces as an
+// ordinary error from RunExperiment and the experiment is reported as "error".
+func (s *Store) FinishWithCancel() *ExperimentState {
+	return s.AtomicSet(func(experiment *ExperimentState) {
+		experiment.Status = Cancelled
+		markEnded(experiment)
+	})
 }
 
 // ErrExperimentRunning reports that the single-experiment slot is taken. It is

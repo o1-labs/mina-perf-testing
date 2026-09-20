@@ -69,6 +69,16 @@ func ValidationSteps(p *GenParams) []ValidationStep {
 			ExitCode: 2,
 		},
 		{
+			// Without this, rounds = 0 passes validation and POST /run starts
+			// an "experiment" that is only the funding preamble, completes
+			// immediately and fires the success webhook.
+			ErrorMsg: "wrong rounds: should be a positive number",
+			Check: func(p *GenParams) bool {
+				return p.Rounds <= 0
+			},
+			ExitCode: 2,
+		},
+		{
 			ErrorMsg: "wrong large-pause-every: should be a positive number",
 			Check: func(p *GenParams) bool {
 				return p.LargePauseEveryNRounds <= 0

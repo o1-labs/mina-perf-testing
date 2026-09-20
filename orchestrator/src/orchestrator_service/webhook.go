@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	logging "github.com/ipfs/go-log/v2"
@@ -23,6 +25,13 @@ type WebhookPayload struct {
 type WebhookNotifier struct {
 	client *http.Client
 	log    logging.StandardLogger
+	// allowPrivate permits webhook destinations on RFC1918/RFC4193 addresses,
+	// for operators running a receiver on the cluster network. Off by default.
+	allowPrivate bool
+	// validateURL guards the destination. It is a field so that tests can aim
+	// at an httptest server, which necessarily listens on loopback and would
+	// otherwise be refused. Nil means the real check.
+	validateURL func(string) error
 }
 
 // NewWebhookNotifier creates a new webhook notifier
@@ -30,9 +39,26 @@ func NewWebhookNotifier(log logging.StandardLogger) *WebhookNotifier {
 	return &WebhookNotifier{
 		client: &http.Client{
 			Timeout: 30 * time.Second,
+			// Without this, a destination that passes validateWebhookURL can
+			// still redirect the POST to an internal address, and the default
+			// policy would follow it up to ten times.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 		log: log,
 	}
+}
+
+// redactURL keeps scheme and host and drops everything after them. For
+// Slack-style webhooks the path carries the secret, so the full URL must never
+// reach the log.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "(redacted)"
+	}
+	return u.Scheme + "://" + u.Host + "/(redacted)"
 }
 
 // SendNotification sends a webhook notification to the specified URL
@@ -41,7 +67,15 @@ func (w *WebhookNotifier) SendNotification(ctx context.Context, webhookURL strin
 		return nil // No webhook URL provided, skip notification
 	}
 
-	w.log.Infof("Sending webhook notification to %s for experiment %s", webhookURL, payload.ExperimentName)
+	validate := w.validateURL
+	if validate == nil {
+		validate = func(u string) error { return validateWebhookURL(u, w.allowPrivate) }
+	}
+	if err := validate(webhookURL); err != nil {
+		return err
+	}
+
+	w.log.Infof("Sending webhook notification to %s for experiment %s", redactURL(webhookURL), payload.ExperimentName)
 
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -58,6 +92,11 @@ func (w *WebhookNotifier) SendNotification(ctx context.Context, webhookURL strin
 
 	resp, err := w.client.Do(req)
 	if err != nil {
+		// *url.Error stringifies with the full URL in it, secret path and all.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return fmt.Errorf("failed to send webhook request to %s: %v", redactURL(webhookURL), urlErr.Err)
+		}
 		return fmt.Errorf("failed to send webhook request: %v", err)
 	}
 	defer resp.Body.Close()
@@ -66,7 +105,7 @@ func (w *WebhookNotifier) SendNotification(ctx context.Context, webhookURL strin
 		return fmt.Errorf("webhook returned non-success status code: %d", resp.StatusCode)
 	}
 
-	w.log.Infof("Successfully sent webhook notification to %s for experiment %s", webhookURL, payload.ExperimentName)
+	w.log.Infof("Successfully sent webhook notification to %s for experiment %s", redactURL(webhookURL), payload.ExperimentName)
 	return nil
 }
 
