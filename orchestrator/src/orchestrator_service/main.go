@@ -231,6 +231,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get generic database object: %v", err)
 	}
+	// Release the single-orchestrator advisory lock before the pool goes away.
+	defer app.Store.Close()
 	defer sqlDB.Close()
 
 	app.Run(*address)

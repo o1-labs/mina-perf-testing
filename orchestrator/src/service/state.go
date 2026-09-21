@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	lib "itn_orchestrator"
@@ -62,7 +63,16 @@ type Store struct {
 	experiment *ExperimentState
 	DB         *gorm.DB
 	cancel     context.CancelFunc
+	// lockConn holds the session-level advisory lock that makes this process
+	// the single orchestrator. It is kept open for the lifetime of the
+	// process: Postgres releases a session lock when its connection dies, so
+	// a crashed pod frees it without anyone cleaning up.
+	lockConn *sql.Conn
 }
+
+// orchestratorLockID is the key for the advisory lock that admits one
+// orchestrator at a time. Arbitrary but fixed; every instance must use it.
+const orchestratorLockID int64 = 0x6d696e61 // "mina"
 
 // NewStore opens the store and creates experiment_state if it is missing.
 //
@@ -81,8 +91,71 @@ func NewStore(db *gorm.DB) (*Store, error) {
 	store := &Store{
 		DB: db,
 	}
-	store.reconcileInterruptedExperiments()
+
+	// Reconcile only while holding the single-orchestrator lock. Without it,
+	// a second pod -- which a rolling update creates by design -- would reap
+	// the *live* run of the first: the UPDATE below is scoped by status
+	// alone, and ExperimentState carries no instance, host or pid column to
+	// scope it by.
+	if store.acquireOrchestratorLock() {
+		store.reconcileInterruptedExperiments()
+	} else {
+		log.Printf("another orchestrator holds the experiment lock; skipping reconcile")
+	}
 	return store, nil
+}
+
+// acquireOrchestratorLock takes the session-level advisory lock, pinned to one
+// connection that is then held for the lifetime of the process.
+//
+// Holding it only across the reconcile would not help: the case to prevent is
+// pod B starting while pod A is mid-experiment, and A is long past its own
+// startup by then. A keeps the lock, so B cannot take it and does not reconcile.
+func (s *Store) acquireOrchestratorLock() bool {
+	sqlDB, err := s.DB.DB()
+	if err != nil {
+		log.Printf("Error obtaining database handle for the orchestrator lock: %v", err)
+		return false
+	}
+
+	ctx := context.Background()
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		log.Printf("Error pinning a connection for the orchestrator lock: %v", err)
+		return false
+	}
+
+	var acquired bool
+	if err := conn.QueryRowContext(ctx,
+		`SELECT pg_try_advisory_lock($1)`, orchestratorLockID).Scan(&acquired); err != nil {
+		log.Printf("Error taking the orchestrator lock: %v", err)
+		conn.Close()
+		return false
+	}
+	if !acquired {
+		conn.Close()
+		return false
+	}
+
+	// Kept open deliberately: closing it would return the connection to the
+	// pool and release the lock.
+	s.lockConn = conn
+	return true
+}
+
+// Close releases the orchestrator lock. Postgres would release it anyway when
+// the connection drops, so this is for orderly shutdown rather than safety.
+func (s *Store) Close() error {
+	if s.lockConn == nil {
+		return nil
+	}
+	conn := s.lockConn
+	s.lockConn = nil
+	if _, err := conn.ExecContext(context.Background(),
+		`SELECT pg_advisory_unlock($1)`, orchestratorLockID); err != nil {
+		log.Printf("Error releasing the orchestrator lock: %v", err)
+	}
+	return conn.Close()
 }
 
 // reconcileInterruptedExperiments closes out experiments the previous process
@@ -102,20 +175,24 @@ func NewStore(db *gorm.DB) (*Store, error) {
 func (s *Store) reconcileInterruptedExperiments() {
 	const note = "Experiment interrupted: the orchestrator restarted while this run was in progress"
 
-	result := s.DB.Exec(`
+	// RETURNING name so the log names what was lost. Selecting a text column
+	// sidesteps the GenParams scan problem entirely.
+	var names []string
+	err := s.DB.Raw(`
 		UPDATE experiment_state
 		SET status = 'error',
 		    ended_at = now(),
 		    updated_at = now(),
 		    errors = array_append(coalesce(errors, ARRAY[]::text[]), ?)
-		WHERE status IN (?, ?)`, note, string(Running), string(Cancelling))
-	if result.Error != nil {
-		log.Printf("Error closing out interrupted experiments: %v", result.Error)
+		WHERE status IN (?, ?)
+		RETURNING name`, note, string(Running), string(Cancelling)).Scan(&names).Error
+	if err != nil {
+		log.Printf("Error closing out interrupted experiments: %v", err)
 		return
 	}
-	if result.RowsAffected > 0 {
-		log.Printf("Closed out %d experiment(s) left in progress when the orchestrator last stopped",
-			result.RowsAffected)
+	if len(names) > 0 {
+		log.Printf("Closed out %d experiment(s) left in progress when the orchestrator last stopped: %s",
+			len(names), strings.Join(names, ", "))
 	}
 }
 
