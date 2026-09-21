@@ -258,13 +258,12 @@ func (s *Store) AppendErrorF(format string, args ...interface{}) error {
 func (s *Store) AppendLogF(format string, args ...interface{}) error {
 	message := fmt.Sprintf(format, args...)
 	s.AtomicSet(func(experiment *ExperimentState) {
-		if strings.HasPrefix(format, "Performing steps") {
-			experiment.CurrentStepName = args[0].(string)
-			experiment.CurrentStepNo = args[2].(int)
-		} else if strings.HasPrefix(format, "Performing step") {
-			experiment.CurrentStepName = args[0].(string)
-			experiment.CurrentStepNo = args[1].(int)
-		}
+		// The current step is reported through Config.ReportStep, wired to
+		// UpdateCurrentStep. This function used to prefix-match the log format
+		// string and type-assert positional args out of it, which read the
+		// batch *end* for "Performing steps %s (%d-%d)" and the *start* for
+		// "Performing step %s (%d)" -- so the reported step jumped forward for
+		// batched steps and not for single ones.
 		experiment.Logs = append(experiment.Logs, message)
 		experiment.UpdatedAt = time.Now()
 	})
