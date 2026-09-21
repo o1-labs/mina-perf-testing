@@ -90,6 +90,9 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 		} else {
 			log.Infof("Performing steps %s (%d-%d)", prevAction.Name(), batchStartStep, batchEndStep)
 		}
+		// Report the step that is starting, always the batch start, rather
+		// than leaving the service to reverse-engineer it from the log line.
+		config.reportStep(prevAction.Name(), batchStartStep)
 		err := prevAction.RunMany(config, actionAccum)
 		if err != nil {
 			batchEndStep := batchStartStep + len(actionAccum) - 1
@@ -113,6 +116,22 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 		postBatchComments = nil
 		return nil
 	}
+
+	// Flush buffered comments however this function leaves, not only on the
+	// success path. Comments accumulate in preBatchComments/postBatchComments
+	// instead of printing as encountered, so an experiment dying at step 9 used
+	// to lose markers like "Starting round 2, 2h10m after start" from both
+	// stderr and experiment_state.logs -- exactly where they are most useful.
+	defer func() {
+		for _, comment := range preBatchComments {
+			printComment(comment, log)
+		}
+		preBatchComments = nil
+		for _, comment := range postBatchComments {
+			printComment(comment, log)
+		}
+		postBatchComments = nil
+	}()
 
 	err := RunActions(inDecoder, config, outCache, log, step,
 		handlePrevAction, &actionAccum, rconfig, &prevAction, &preBatchComments, &postBatchComments, &batchStartStep)
@@ -138,13 +157,7 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 		}
 	}
 
-	// Print any remaining accumulated comments at the end
-	for _, comment := range preBatchComments {
-		printComment(comment, log)
-	}
-	for _, comment := range postBatchComments {
-		printComment(comment, log)
-	}
+	// The deferred flush above prints whatever is still buffered.
 	return nil
 }
 
