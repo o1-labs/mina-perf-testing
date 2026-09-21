@@ -44,6 +44,21 @@ func ValidationSteps(p *GenParams) []ValidationStep {
 		simpleRangeCheck(p.MaxCostMixedTpsRatio, "max-cost-mixed ratio"),
 		simpleRangeCheck(p.RotationRatio, "rotation ratio"),
 		{
+			// simpleRangeCheck tests each ratio against [0,1] independently,
+			// so an inverted pair passes it. That makes SampleStopRatio's
+			// stddev negative, and ~0.27% of draws come back below zero
+			// (measured: 5390/2000000, low of -0.65). Both derived ratios
+			// then go negative, every `> 1e-6` guard in generate.go fails,
+			// and the round emits no stop command at all -- a misconfigured
+			// experiment silently performs zero node stops instead of
+			// erroring.
+			ErrorMsg: "min stop ratio must not exceed max stop ratio",
+			Check: func(p *GenParams) bool {
+				return p.MinStopRatio > p.MaxStopRatio
+			},
+			ExitCode: 2,
+		},
+		{
 			ErrorMsg: "both max-cost-mixed and max-cost specified",
 			Check: func(p *GenParams) bool {
 				return p.MaxCost && p.MaxCostMixedTpsRatio > 1e-3

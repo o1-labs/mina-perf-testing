@@ -47,7 +47,6 @@ func scheduleTransactionBatches(
 		return nil
 	}
 	for _, nodeAddress := range fallbackNodes {
-		var handle string
 		handle, err := schedule(nodeAddress, successfulBatches, remTps, remFeePayers)
 		if err != nil {
 			config.Log.Warnf("error scheduling %s for fallback node %s: %v", actionName, nodeAddress, err)
@@ -56,8 +55,23 @@ func scheduleTransactionBatches(
 		output(nodeAddress, handle)
 		return nil
 	}
-	if remTps >= minTps {
-		config.Log.Warnf("unable to schedule %.6f of %.6f total tps for %s after trying %d fallback nodes", remTps, tpsTotal, actionName, len(fallbackNodes))
+	// Reaching here means the fallback nodes did not absorb the remainder
+	// either. `remTps >= minTps` is always true at this point -- the only way
+	// past the check above is remTps >= minTps, and nothing modifies it in
+	// between -- so the warning is unconditional.
+	config.Log.Warnf("unable to schedule %.6f of %.6f total tps for %s after trying %d fallback nodes",
+		remTps, tpsTotal, actionName, len(fallbackNodes))
+
+	// A total failure must not be reported as success. selectNodesWithFallback
+	// returns no fallback nodes whenever tps/minTps >= node count, which is the
+	// common case, so when every selected node rejects the request control fell
+	// straight through to `return nil`. orchestrator.go aborts only on a
+	// non-nil error, so it advanced to the next step and the load test reported
+	// success having sent nothing -- and emitted no receipts, leaving the later
+	// stop step with no handles either.
+	if successfulBatches == 0 {
+		return fmt.Errorf("failed to schedule any %s batch across %d nodes and %d fallback nodes",
+			actionName, len(selectedNodes), len(fallbackNodes))
 	}
 	return nil
 }

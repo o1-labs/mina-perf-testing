@@ -115,7 +115,7 @@ func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.St
 	// at step 0 indefinitely reporting nothing. That is how the 2026-08-25 run
 	// was lost. Refuse instead, unless the operator has explicitly accepted an
 	// unverified pairing.
-	minaExecPath, err := getMinaExecutablePath(a.Store.DB, log)
+	minaExecPath, err := getMinaExecutablePath(config.Ctx, a.Store.DB, log)
 	if err != nil {
 		msg := fmt.Sprintf("Could not take the mina client from the deployed daemon image: %v.", err)
 		if !config.AllowUnverifiedMinaExec {

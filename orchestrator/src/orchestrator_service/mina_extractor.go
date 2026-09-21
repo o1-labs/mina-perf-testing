@@ -59,6 +59,19 @@ func getLatestDeploymentRelease(db *gorm.DB) (string, error) {
 	return release.String, nil
 }
 
+// The registry calls used to run on &http.Client{} and http.DefaultClient,
+// both of which have Timeout: 0. If egress was blackholed after the TCP
+// connect, the extractor blocked in Read forever; it runs from loadRun in a
+// goroutine, so POST /experiment/run had already returned 200, the experiment
+// sat at "running" reporting nothing, and Store.Add 409'd every later create
+// until the pod was restarted.
+var (
+	// metadataClient covers the token and manifest calls, which are small.
+	metadataClient = &http.Client{Timeout: 30 * time.Second}
+	// blobClient covers layer downloads, which are hundreds of megabytes.
+	blobClient = &http.Client{Timeout: 30 * time.Minute}
+)
+
 // osCodenames are the distributions mina-daemon images are built for. Only a
 // segment naming one of these is a codename we may rewrite.
 var osCodenames = map[string]bool{
@@ -116,7 +129,7 @@ func minaCommit(execPath string) (string, error) {
 }
 
 // getMinaExecutablePath returns the path to the cached Mina executable, extracting it if necessary
-func getMinaExecutablePath(db *gorm.DB, log logging.StandardLogger) (string, error) {
+func getMinaExecutablePath(ctx context.Context, db *gorm.DB, log logging.StandardLogger) (string, error) {
 	// Get the latest deployment release
 	release, err := getLatestDeploymentRelease(db)
 	if err != nil {
@@ -145,7 +158,7 @@ func getMinaExecutablePath(db *gorm.DB, log logging.StandardLogger) (string, err
 	dockerImage := fmt.Sprintf("europe-west3-docker.pkg.dev/o1labs-192920/euro-docker-repo/mina-daemon:%s", processedRelease)
 	log.Infof("Extracting Mina executable from Docker image: %s", dockerImage)
 
-	if err := extractMinaBinary(dockerImage, executablePath, log); err != nil {
+	if err := extractMinaBinary(ctx, dockerImage, executablePath, log); err != nil {
 		return "", fmt.Errorf("failed to extract mina binary: %w", err)
 	}
 
@@ -153,7 +166,7 @@ func getMinaExecutablePath(db *gorm.DB, log logging.StandardLogger) (string, err
 }
 
 // extractMinaBinary extracts the mina binary from a Docker image
-func extractMinaBinary(dockerImage, outputFile string, log logging.StandardLogger) error {
+func extractMinaBinary(ctx context.Context, dockerImage, outputFile string, log logging.StandardLogger) error {
 	log.Infof("Starting extraction of mina binary from Docker image: %s", dockerImage)
 
 	// Create temporary directory
@@ -167,7 +180,7 @@ func extractMinaBinary(dockerImage, outputFile string, log logging.StandardLogge
 
 	// Get registry token
 	log.Debugf("Getting registry token for Docker image extraction")
-	token, err := getRegistryToken(log)
+	token, err := getRegistryToken(ctx, log)
 	if err != nil {
 		return fmt.Errorf("failed to get registry token: %w", err)
 	}
@@ -175,7 +188,7 @@ func extractMinaBinary(dockerImage, outputFile string, log logging.StandardLogge
 
 	// Get image manifest
 	log.Debugf("Getting image manifest for %s", dockerImage)
-	manifest, err := getImageManifest(token, dockerImage, log)
+	manifest, err := getImageManifest(ctx, token, dockerImage, log)
 	if err != nil {
 		return fmt.Errorf("failed to get image manifest: %w", err)
 	}
@@ -185,15 +198,12 @@ func extractMinaBinary(dockerImage, outputFile string, log logging.StandardLogge
 	log.Infof("Searching for mina binary in %d layers", len(manifest.Layers))
 	for i, layer := range manifest.Layers {
 		log.Debugf("Processing layer %d/%d: %s", i+1, len(manifest.Layers), layer.Digest)
-		if found, err := processLayer(token, layer.Digest, tempDir, i+1, outputFile, dockerImage, log); err != nil {
+		if found, err := processLayer(ctx, token, layer.Digest, tempDir, i+1, outputFile, dockerImage, log); err != nil {
 			log.Warnf("Failed to process layer %d: %v", i+1, err)
 			continue
 		} else if found {
-			// Make executable
-			if err := os.Chmod(outputFile, 0755); err != nil {
-				return fmt.Errorf("failed to make binary executable: %w", err)
-			}
-
+			// extractLayer chmods before renaming into place, so the file is
+			// already executable by the time it exists at outputFile.
 			log.Infof("Successfully extracted mina binary to: %s", outputFile)
 			return nil
 		}
@@ -202,10 +212,15 @@ func extractMinaBinary(dockerImage, outputFile string, log logging.StandardLogge
 	return fmt.Errorf("mina binary not found in any layer")
 }
 
-func getRegistryToken(log logging.StandardLogger) (string, error) {
+func getRegistryToken(ctx context.Context, log logging.StandardLogger) (string, error) {
 	tokenURL := "https://europe-west3-docker.pkg.dev/v2/token?service=europe-west3-docker.pkg.dev&scope=repository:o1labs-192920/euro-docker-repo/mina-daemon:pull"
 
-	resp, err := http.Get(tokenURL)
+	req, err := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := metadataClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -227,7 +242,7 @@ func getRegistryToken(log logging.StandardLogger) (string, error) {
 	return tokenResp.Token, nil
 }
 
-func getImageManifest(token, dockerImage string, log logging.StandardLogger) (*Manifest, error) {
+func getImageManifest(ctx context.Context, token, dockerImage string, log logging.StandardLogger) (*Manifest, error) {
 	// Parse the docker image to extract repository and tag
 	parts := strings.Split(dockerImage, ":")
 	if len(parts) != 2 {
@@ -244,7 +259,7 @@ func getImageManifest(token, dockerImage string, log logging.StandardLogger) (*M
 
 	log.Infof("Fetching image manifest: url=%s tag=%s", manifestURL, tag)
 
-	req, err := http.NewRequest("GET", manifestURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", manifestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -252,8 +267,7 @@ func getImageManifest(token, dockerImage string, log logging.StandardLogger) (*M
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := metadataClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +285,7 @@ func getImageManifest(token, dockerImage string, log logging.StandardLogger) (*M
 	return &manifest, nil
 }
 
-func processLayer(token, digest, tempDir string, layerNum int, outputFile, dockerImage string, log logging.StandardLogger) (bool, error) {
+func processLayer(ctx context.Context, token, digest, tempDir string, layerNum int, outputFile, dockerImage string, log logging.StandardLogger) (bool, error) {
 	// Parse repository from dockerImage for blob URL
 	parts := strings.Split(dockerImage, ":")
 	repository := parts[0]
@@ -281,7 +295,7 @@ func processLayer(token, digest, tempDir string, layerNum int, outputFile, docke
 	blobURL := fmt.Sprintf("https://europe-west3-docker.pkg.dev/v2/%s/blobs/%s", repo, digest)
 	layerFile := filepath.Join(tempDir, fmt.Sprintf("layer_%d.tar.gz", layerNum))
 
-	if err := downloadLayer(token, blobURL, layerFile, log); err != nil {
+	if err := downloadLayer(ctx, token, blobURL, layerFile, log); err != nil {
 		return false, fmt.Errorf("failed to download layer: %w", err)
 	}
 	defer os.Remove(layerFile)
@@ -290,17 +304,16 @@ func processLayer(token, digest, tempDir string, layerNum int, outputFile, docke
 	return extractLayer(layerFile, outputFile, log)
 }
 
-func downloadLayer(token, blobURL, outputPath string, log logging.StandardLogger) error {
+func downloadLayer(ctx context.Context, token, blobURL, outputPath string, log logging.StandardLogger) error {
 	log.Debugf("Downloading layer from: %s", blobURL)
-	req, err := http.NewRequest("GET", blobURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", blobURL, nil)
 	if err != nil {
 		return err
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := blobClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -314,10 +327,14 @@ func downloadLayer(token, blobURL, outputPath string, log logging.StandardLogger
 	if err != nil {
 		return err
 	}
-	defer outFile.Close()
 
-	_, err = io.Copy(outFile, resp.Body)
-	return err
+	if _, err := io.Copy(outFile, resp.Body); err != nil {
+		outFile.Close()
+		return err
+	}
+	// Checked rather than deferred: a failed flush here would otherwise be
+	// reported as a complete layer and searched as if it were one.
+	return outFile.Close()
 }
 
 func extractLayer(layerFile, outputFile string, log logging.StandardLogger) (bool, error) {
@@ -362,15 +379,38 @@ func extractLayer(layerFile, outputFile string, log logging.StandardLogger) (boo
 			if header.Typeflag == tar.TypeReg {
 				log.Infof("Found mina binary in layer at path: %s", header.Name)
 
-				outFile, err := os.Create(outputFile)
+				// Write to a temporary file and rename into place. Writing
+				// straight to outputFile meant a short read or a mid-copy
+				// failure left a partial file at the cache path; cache
+				// validity is a bare os.Stat, so every later run then
+				// reported "Using cached Mina executable" and pointed
+				// MinaExec at a truncated, non-executable file -- for good,
+				// until someone deleted it by hand.
+				tmpPath := fmt.Sprintf("%s.tmp-%d", outputFile, os.Getpid())
+				defer os.Remove(tmpPath)
+
+				outFile, err := os.Create(tmpPath)
 				if err != nil {
 					return false, fmt.Errorf("failed to create output file: %w", err)
 				}
-				defer outFile.Close()
 
-				_, err = io.Copy(outFile, tarReader)
-				if err != nil {
+				if _, err := io.Copy(outFile, tarReader); err != nil {
+					outFile.Close()
 					return false, fmt.Errorf("failed to copy binary: %w", err)
+				}
+
+				// Checked, not deferred: a deferred Close discards the error,
+				// and a failed flush would otherwise be reported as success.
+				if err := outFile.Close(); err != nil {
+					return false, fmt.Errorf("failed to flush binary: %w", err)
+				}
+
+				if err := os.Chmod(tmpPath, 0755); err != nil {
+					return false, fmt.Errorf("failed to make binary executable: %w", err)
+				}
+
+				if err := os.Rename(tmpPath, outputFile); err != nil {
+					return false, fmt.Errorf("failed to move binary into place: %w", err)
 				}
 
 				return true, nil
