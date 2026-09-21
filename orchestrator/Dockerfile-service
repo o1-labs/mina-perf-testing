@@ -39,7 +39,7 @@ RUN apt-get update --quiet --yes \
   && rm -rf /var/lib/apt/lists/*
 
 RUN echo "downloading mina" \
-  && echo "deb [trusted=yes] http://packages.o1test.net jammy alpha" > /etc/apt/sources.list.d/mina.list \
+  && echo "deb [trusted=yes] https://packages.o1test.net jammy alpha" > /etc/apt/sources.list.d/mina.list \
   && apt-get update --quiet --yes \
   && apt-get install --quiet --yes --allow-downgrades \
     mina-devnet=4.0.0-6965b50 \
