@@ -64,6 +64,11 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 	orchestratorConfig := *h.Config
 	log := service.StoreLogging{Store: h.Store, Log: logging.Logger("orchestrator")}
 	config := lib.SetupConfig(ctx, orchestratorConfig, log)
+	// Report progress directly rather than having the store infer it from log
+	// format strings.
+	config.ReportStep = func(name string, step int) {
+		h.Store.UpdateCurrentStep(name, step)
+	}
 
 	if err := h.Store.Add(job, cancel); err != nil {
 		return http.StatusConflict, []string{fmt.Sprintf("failed to add experiment: %v", err)}, nil

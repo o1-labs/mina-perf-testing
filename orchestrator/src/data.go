@@ -56,6 +56,24 @@ type Config struct {
 	FundDaemonPorts    []string
 	UrlOverrides       []string
 	PrintRequests      bool
+	// ReportStep, when set, is called as each step or batch begins. It exists
+	// so the orchestrator can report progress directly instead of the service
+	// prefix-matching log format strings and type-asserting positional args --
+	// which reported the batch *end* for a batch and the *start* for a single
+	// step, so the number jumped differently depending on batch size. Nil for
+	// the standalone generator, which has nowhere to report to.
+	//
+	// It is a func rather than an interface because Config lives in the
+	// orchestrator package and the Store lives below it; the reverse import
+	// would be a cycle.
+	ReportStep func(name string, step int)
+}
+
+// reportStep invokes the hook when one is configured.
+func (c Config) reportStep(name string, step int) {
+	if c.ReportStep != nil {
+		c.ReportStep(name, step)
+	}
 }
 
 type OutputF = func(name string, value any, multiple bool, sensitive bool) error
