@@ -64,6 +64,11 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 	orchestratorConfig := *h.Config
 	log := service.StoreLogging{Store: h.Store, Log: logging.Logger("orchestrator")}
 	config := lib.SetupConfig(ctx, orchestratorConfig, log)
+	// Report progress directly rather than having the store infer it from log
+	// format strings.
+	config.ReportStep = func(name string, step int) {
+		h.Store.UpdateCurrentStep(name, step)
+	}
 
 	// Add both claims the experiment slot and persists the experiment, and it
 	// releases the claim if the write fails. A held slot is the caller's

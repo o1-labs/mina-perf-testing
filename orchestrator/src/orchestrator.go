@@ -332,6 +332,7 @@ func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log 
 			*preBatchComments = nil
 
 			log.Infof("Performing step %s (%d)", cmd.Action, step)
+			config.reportStep(cmd.Action, step)
 			err = action.Run(config, params, outputF(outCache, log, step))
 			if err != nil {
 				return &OrchestratorError{
