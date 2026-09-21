@@ -252,11 +252,26 @@ func SampleTps(baseTps, stressTps float64) float64 {
 	return tpsStddev*math.Abs(gaussRandom()) + baseTps
 }
 
+// SampleStopRatio draws a stop ratio in [minRatio, maxRatio].
+//
+// Both ends are clamped. Clamping only the upper end left the lower end open
+// whenever minRatio > maxRatio: the stddev goes negative and ~0.27% of draws
+// come back below zero (measured 5390/2000000, low of -0.65). A negative ratio
+// fails every `> 1e-6` guard in Generate, so the round emits no stop command
+// at all and the experiment silently performs zero node stops. ValidationSteps
+// rejects that pair, but the sampler should not depend on validation having
+// run.
 func SampleStopRatio(minRatio, maxRatio float64) float64 {
+	if minRatio > maxRatio {
+		minRatio, maxRatio = maxRatio, minRatio
+	}
 	stddev := (maxRatio - minRatio) / 3
 	r := stddev*math.Abs(gaussRandom()) + minRatio
 	if r > maxRatio {
 		return maxRatio
+	}
+	if r < minRatio {
+		return minRatio
 	}
 	return r
 }
