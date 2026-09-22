@@ -132,10 +132,21 @@ func (v *CommandOrComment) UnmarshalJSON(data []byte) error {
 type OrchestratorError struct {
 	Message string
 	Code    int
+	// Cause is the error this one wraps. Message flattens the cause with %v
+	// for the operator-facing text, and a flattened string is not matchable:
+	// without this field errors.Is(err, context.Canceled) was false for every
+	// action except the single BatchAction, so the orchestrator service filed
+	// an operator cancel as a failure and fired the error webhook.
+	Cause error
 }
 
 func (e *OrchestratorError) Error() string {
 	return e.Message
+}
+
+// Unwrap exposes the wrapped cause to errors.Is and errors.As.
+func (e *OrchestratorError) Unwrap() error {
+	return e.Cause
 }
 
 type outCacheT = map[string]map[int]map[string]OutputCacheEntry
@@ -147,6 +158,7 @@ func outputF(outCache outCacheT, log logging.StandardLogger, step int) func(stri
 			return &OrchestratorError{
 				Message: fmt.Sprintf("Error marshalling value %s for step %d: %v", name, step, err),
 				Code:    7,
+				Cause:   err,
 			}
 		}
 		if _, has := outCache[""][step]; !has {
@@ -177,6 +189,7 @@ func outputF(outCache outCacheT, log logging.StandardLogger, step int) func(stri
 				return &OrchestratorError{
 					Message: fmt.Sprintf("Error marshalling output %s for step %d: %v", name, step, err),
 					Code:    8,
+					Cause:   err,
 				}
 			}
 			_, err = os.Stdout.Write(append(json, '\n'))
@@ -184,6 +197,7 @@ func outputF(outCache outCacheT, log logging.StandardLogger, step int) func(stri
 				return &OrchestratorError{
 					Message: fmt.Sprintf("Error writing output %s for step %d: %v", name, step, err),
 					Code:    8,
+					Cause:   err,
 				}
 			}
 		}
@@ -262,6 +276,7 @@ func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log 
 				return &OrchestratorError{
 					Message: fmt.Sprintf("Error decoding command for step %d: %v", step, err),
 					Code:    5,
+					Cause:   err,
 				}
 			}
 			break
@@ -286,6 +301,7 @@ func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log 
 			return &OrchestratorError{
 				Message: fmt.Sprintf("Error resolving params for step %d: %v", step, err),
 				Code:    6,
+				Cause:   err,
 			}
 		}
 		action := actions[cmd.Action]
@@ -302,6 +318,7 @@ func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log 
 				return &OrchestratorError{
 					Message: fmt.Sprintf("Error validating action '%s' for step %d: %v", cmd.Action, step, err),
 					Code:    1,
+					Cause:   err,
 				}
 			}
 			// If this is the start of a new batch, record the starting step
@@ -327,6 +344,7 @@ func RunActions(inDecoder *json.Decoder, config Config, outCache outCacheT, log 
 				return &OrchestratorError{
 					Message: fmt.Sprintf("Error running step %d: %v", step, err),
 					Code:    9,
+					Cause:   err,
 				}
 			}
 		}

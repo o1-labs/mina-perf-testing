@@ -6,7 +6,6 @@ import (
 )
 
 const MAX_SUBMIT_PAYLOAD_SIZE = 50000000 // max payload size in bytes
-const REQUESTS_PER_PK_HOURLY = 120
 const UPTIME_BACKEND_LISTEN_TO = ":8080"
 const TIME_DIFF_DELTA time.Duration = -5 * time.Minute // -5m
 const WHITELIST_REFRESH_INTERVAL = 10 * time.Minute    // 10m
