@@ -252,7 +252,10 @@ func SampleTps(baseTps, stressTps float64) float64 {
 	return tpsStddev*math.Abs(gaussRandom()) + baseTps
 }
 
-// SampleStopRatio draws a stop ratio in [minRatio, maxRatio].
+// SampleStopRatio draws a stop ratio in [minRatio, maxRatio], ordering the
+// pair first, so an inverted pair is drawn from rather than escaped from. It
+// does not force the result into [0, 1]: a pair outside the unit range is
+// rejected by ValidationSteps, and clamping here as well would hide that.
 //
 // Both ends are clamped. Clamping only the upper end left the lower end open
 // whenever minRatio > maxRatio: the stddev goes negative and ~0.27% of draws
