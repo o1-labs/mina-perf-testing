@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	lib "itn_orchestrator"
 	"log"
 	"strings"
@@ -63,16 +64,47 @@ type Store struct {
 	experiment *ExperimentState
 	DB         *gorm.DB
 	cancel     context.CancelFunc
+	// lockMu guards lockConn and stopLock. It is separate from mu so that a
+	// slow lock query cannot block GET /status or POST /cancel.
+	lockMu sync.Mutex
 	// lockConn holds the session-level advisory lock that makes this process
-	// the single orchestrator. It is kept open for the lifetime of the
-	// process: Postgres releases a session lock when its connection dies, so
-	// a crashed pod frees it without anyone cleaning up.
+	// the single orchestrator. Postgres releases a session lock when its
+	// connection dies, so a crashed pod frees it without anyone cleaning up --
+	// and, for the same reason, a dropped connection silently releases it
+	// while this process is still running, which is why the supervisor below
+	// re-proves the connection instead of trusting the field.
 	lockConn *sql.Conn
+	// stopLock ends the supervisor goroutine.
+	stopLock context.CancelFunc
 }
 
 // orchestratorLockID is the key for the advisory lock that admits one
-// orchestrator at a time. Arbitrary but fixed; every instance must use it.
-const orchestratorLockID int64 = 0x6d696e61 // "mina"
+// orchestrator at a time.
+//
+// The value is the FNV-1a hash of the string below rather than a readable
+// constant: an advisory lock key is global to the database, and "mina" spelt
+// in ASCII (0x6d696e61) is exactly what another Mina-adjacent tool sharing
+// this database would reach for first.
+//
+// The lock is session-level, so it requires a direct connection or a pooler in
+// session mode. Through PgBouncer in transaction or statement mode the lock is
+// taken on a connection the pooler may hand to somebody else, and the whole
+// design fails silently.
+var orchestratorLockID = fnvLockID("o1labs/mina-perf-testing:orchestrator-experiment-slot")
+
+func fnvLockID(name string) int64 {
+	h := fnv.New64a()
+	h.Write([]byte(name))
+	return int64(h.Sum64())
+}
+
+// lockPollInterval is how often the supervisor retries the lock and re-proves
+// the one it holds. It is a variable so the tests do not wait on it.
+var lockPollInterval = 30 * time.Second
+
+// lockQueryTimeout bounds every lock statement, so a reachable but hung
+// Postgres cannot block startup or the supervisor forever.
+const lockQueryTimeout = 10 * time.Second
 
 // NewStore opens the store and creates experiment_state if it is missing.
 //
@@ -97,12 +129,107 @@ func NewStore(db *gorm.DB) (*Store, error) {
 	// the *live* run of the first: the UPDATE below is scoped by status
 	// alone, and ExperimentState carries no instance, host or pid column to
 	// scope it by.
-	if store.acquireOrchestratorLock() {
-		store.reconcileInterruptedExperiments()
-	} else {
-		log.Printf("another orchestrator holds the experiment lock; skipping reconcile")
-	}
+	//
+	// The lock is taken by a supervisor rather than once here. A single
+	// attempt at startup failed in both directions: a rolling update starts
+	// the new pod while the old one still holds the lock, and with no retry
+	// that pod never reconciled at all, so the old row stayed `running`
+	// forever; and a connection drop releases the lock in Postgres while this
+	// process still believes it holds it, which is the table-wide reap
+	// restored after one blip.
+	ctx, cancel := context.WithCancel(context.Background())
+	store.stopLock = cancel
+	store.superviseOrchestratorLock(ctx)
 	return store, nil
+}
+
+// HasLock reports whether this process currently holds the single-orchestrator
+// lock.
+func (s *Store) HasLock() bool {
+	s.lockMu.Lock()
+	defer s.lockMu.Unlock()
+	return s.lockConn != nil
+}
+
+// superviseOrchestratorLock takes the lock, reconciles on every acquisition,
+// and keeps proving that the connection holding it is still alive.
+func (s *Store) superviseOrchestratorLock(ctx context.Context) {
+	s.pollOrchestratorLock()
+
+	go func() {
+		ticker := time.NewTicker(lockPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.pollOrchestratorLock()
+			}
+		}
+	}()
+}
+
+// pollOrchestratorLock is one supervisor step: prove the lock we hold, or try
+// to take one we do not.
+func (s *Store) pollOrchestratorLock() {
+	if s.holdsLiveLock() {
+		return
+	}
+	acquired, err := s.acquireOrchestratorLock()
+	switch {
+	case err != nil:
+		// Distinct from "somebody else holds it": reporting a failed query as
+		// a held lock said something untrue about another pod.
+		log.Printf("Could not determine the orchestrator lock: %v", err)
+	case !acquired:
+		log.Printf("Another orchestrator holds the experiment lock; not reconciling")
+	default:
+		log.Printf("Took the orchestrator lock")
+		s.reconcileInterruptedExperiments()
+	}
+}
+
+// holdsLiveLock reports whether the pinned connection is still usable. A
+// session lock lives on its connection: when that connection dies, Postgres
+// drops the lock and database/sql does not reconnect a *sql.Conn, so without
+// this check the process holds nothing and knows nothing.
+func (s *Store) holdsLiveLock() bool {
+	s.lockMu.Lock()
+	conn := s.lockConn
+	s.lockMu.Unlock()
+	if conn == nil {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), lockQueryTimeout)
+	defer cancel()
+
+	// The question asked of the pinned connection is "does this session still
+	// hold an advisory lock", not "is the connection alive". A ping is not
+	// enough: the driver can answer it from a fresh connection, which holds
+	// nothing, and Postgres has already dropped the lock with the session that
+	// died.
+	var held bool
+	err := conn.QueryRowContext(ctx, `
+		SELECT count(*) > 0
+		FROM pg_locks
+		WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()`).Scan(&held)
+	if err != nil || !held {
+		if err != nil {
+			log.Printf("Lost the connection holding the orchestrator lock (%v); another orchestrator may take it", err)
+		} else {
+			log.Printf("The orchestrator lock is no longer held on this session; another orchestrator may take it")
+		}
+		s.lockMu.Lock()
+		if s.lockConn == conn {
+			s.lockConn = nil
+		}
+		s.lockMu.Unlock()
+		conn.Close()
+		return false
+	}
+	return true
 }
 
 // acquireOrchestratorLock takes the session-level advisory lock, pinned to one
@@ -111,46 +238,59 @@ func NewStore(db *gorm.DB) (*Store, error) {
 // Holding it only across the reconcile would not help: the case to prevent is
 // pod B starting while pod A is mid-experiment, and A is long past its own
 // startup by then. A keeps the lock, so B cannot take it and does not reconcile.
-func (s *Store) acquireOrchestratorLock() bool {
+func (s *Store) acquireOrchestratorLock() (bool, error) {
 	sqlDB, err := s.DB.DB()
 	if err != nil {
-		log.Printf("Error obtaining database handle for the orchestrator lock: %v", err)
-		return false
+		return false, fmt.Errorf("obtaining database handle: %w", err)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), lockQueryTimeout)
+	defer cancel()
+
+	// One connection is pinned for the lifetime of the lock. This is free
+	// while SetMaxOpenConns is unset, as it is here and on main; setting it to
+	// 1 would deadlock the service against its own lock.
 	conn, err := sqlDB.Conn(ctx)
 	if err != nil {
-		log.Printf("Error pinning a connection for the orchestrator lock: %v", err)
-		return false
+		return false, fmt.Errorf("pinning a connection: %w", err)
 	}
 
 	var acquired bool
 	if err := conn.QueryRowContext(ctx,
 		`SELECT pg_try_advisory_lock($1)`, orchestratorLockID).Scan(&acquired); err != nil {
-		log.Printf("Error taking the orchestrator lock: %v", err)
 		conn.Close()
-		return false
+		return false, fmt.Errorf("taking the lock: %w", err)
 	}
 	if !acquired {
 		conn.Close()
-		return false
+		return false, nil
 	}
 
 	// Kept open deliberately: closing it would return the connection to the
 	// pool and release the lock.
+	s.lockMu.Lock()
 	s.lockConn = conn
-	return true
+	s.lockMu.Unlock()
+	return true, nil
 }
 
-// Close releases the orchestrator lock. Postgres would release it anyway when
-// the connection drops, so this is for orderly shutdown rather than safety.
+// Close stops the lock supervisor and releases the orchestrator lock.
+// Postgres would release it anyway when the connection drops, so this is for
+// orderly shutdown rather than safety; main.go calls it from the signal
+// handler, which is what makes an orderly shutdown happen at all.
 func (s *Store) Close() error {
-	if s.lockConn == nil {
-		return nil
+	if s.stopLock != nil {
+		s.stopLock()
+		s.stopLock = nil
 	}
+
+	s.lockMu.Lock()
 	conn := s.lockConn
 	s.lockConn = nil
+	s.lockMu.Unlock()
+	if conn == nil {
+		return nil
+	}
 	if _, err := conn.ExecContext(context.Background(),
 		`SELECT pg_advisory_unlock($1)`, orchestratorLockID); err != nil {
 		log.Printf("Error releasing the orchestrator lock: %v", err)
@@ -206,8 +346,15 @@ func (a *Store) NameIsUnique(name string) bool {
 	return count == 0
 }
 
+// dbWriteTimeout bounds the writes taken under s.mu.
+const dbWriteTimeout = 30 * time.Second
+
 func (a *Store) WriteExperimentToDB(state ExperimentState) error {
-	err := a.DB.Create(&state).Error
+	return a.WriteExperimentToDBContext(context.Background(), state)
+}
+
+func (a *Store) WriteExperimentToDBContext(ctx context.Context, state ExperimentState) error {
+	err := a.DB.WithContext(ctx).Create(&state).Error
 	if err != nil {
 		log.Printf("Error writing experiment to DB: %v", err)
 		return err
@@ -222,7 +369,13 @@ func (a *Store) WriteExperimentToDB(state ExperimentState) error {
 // AtomicSet, i.e. once per appended log line, so including it re-marshalled the
 // whole GenParams -- Privkeys and RotationKeys among them -- on every log line.
 func (a *Store) updateExperimentInDB(state *ExperimentState) error {
-	err := a.DB.Model(&ExperimentState{}).Where("name = ?", state.Name).Updates(map[string]interface{}{
+	// Bounded for the same reason as the INSERT in Add: this runs from
+	// AtomicSet, i.e. once per appended log line, and AtomicSet holds s.mu
+	// throughout, so an unbounded write against a hung Postgres would block
+	// GET /status and POST /cancel with it.
+	ctx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+	defer cancel()
+	err := a.DB.WithContext(ctx).Model(&ExperimentState{}).Where("name = ?", state.Name).Updates(map[string]interface{}{
 		"updated_at":        state.UpdatedAt,
 		"ended_at":          state.EndedAt,
 		"status":            state.Status,
@@ -356,7 +509,14 @@ func (s *Store) Add(experiment *ExperimentState, cancel context.CancelFunc) erro
 			time.Since(s.experiment.CreatedAt).Truncate(time.Second),
 			s.experiment.CurrentStepNo, s.experiment.CurrentStepName)
 	}
-	if err := s.WriteExperimentToDB(*experiment); err != nil {
+	// The INSERT happens under s.mu, which is what makes claiming the slot and
+	// persisting the experiment one step. It is bounded, because that mutex
+	// also serialises AtomicGet and Cancel: an unbounded write against a hung
+	// Postgres would block GET /status and POST /cancel with it, and a
+	// liveness probe on the status endpoint would then restart the pod.
+	ctx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+	defer cancel()
+	if err := s.WriteExperimentToDBContext(ctx, *experiment); err != nil {
 		return fmt.Errorf("failed to write experiment to database: %w", err)
 	}
 	s.experiment = experiment

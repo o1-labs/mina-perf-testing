@@ -606,3 +606,37 @@ func writeBinary(src io.Reader, outputFile string) error {
 	}
 	return nil
 }
+
+// commitSegmentRe matches the abbreviated build commit inside a release tag.
+var commitSegmentRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+// releaseCommit returns the build commit a release tag names, or "" when the
+// tag carries none.
+//
+// Tags look like "4.0.0-rc1-83b4654" or
+// "3.3.0-alpha1-compatible-90ff48c-jammy-devnet": the commit is a hex segment,
+// and the last one wins, since an earlier segment can be a version fragment.
+func releaseCommit(release string) string {
+	found := ""
+	for _, part := range strings.Split(release, "-") {
+		if osCodenames[part] {
+			continue
+		}
+		if commitSegmentRe.MatchString(part) {
+			found = part
+		}
+	}
+	return found
+}
+
+// commitsMatch compares a tag's abbreviated commit with a client's full one.
+func commitsMatch(tagCommit, clientCommit string) bool {
+	if tagCommit == "" || clientCommit == "" {
+		return false
+	}
+	short, long := strings.ToLower(tagCommit), strings.ToLower(clientCommit)
+	if len(short) > len(long) {
+		short, long = long, short
+	}
+	return strings.HasPrefix(long, short)
+}
