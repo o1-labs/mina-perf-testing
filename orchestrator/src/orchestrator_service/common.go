@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,10 +36,18 @@ func writeJSONResponse(w http.ResponseWriter, data interface{}) {
 	}
 }
 
-// validateContentLength validates the request content length
+// errRequestTooLarge marks a body over the limit, so that ServeHTTP can answer
+// 413 rather than 400.
+var errRequestTooLarge = errors.New("request body too large")
+
+// validateContentLength validates the request content length.
+//
+// It is a fast path only. A chunked request carries ContentLength -1, so this
+// check passes and the size limit is enforced by http.MaxBytesReader in
+// parseExperimentSetup instead.
 func validateContentLength(r *http.Request, maxSize int64) error {
 	if r.ContentLength > maxSize {
-		return fmt.Errorf("request body too large: %d bytes (max %d)", r.ContentLength, maxSize)
+		return fmt.Errorf("%w: %d bytes (max %d)", errRequestTooLarge, r.ContentLength, maxSize)
 	}
 	return nil
 }
@@ -75,6 +84,14 @@ func parseExperimentSetup(r *http.Request) (*service_inputs.GeneratorInputData, 
 
 	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxRequestSize))
 	if err != nil {
+		// A chunked body is truncated here rather than by
+		// validateContentLength, and MaxBytesReader reports that as
+		// *http.MaxBytesError. Without this the caller got
+		// "unexpected EOF" and a 400, which names the wrong problem.
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return nil, fmt.Errorf("%w: over %d bytes", errRequestTooLarge, maxRequestSize)
+		}
 		return nil, fmt.Errorf("failed to read request body: %v", err)
 	}
 

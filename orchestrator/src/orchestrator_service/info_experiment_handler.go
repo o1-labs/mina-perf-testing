@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -52,7 +53,11 @@ func (h *InfoExperimentHandler) Handle(setup *service_inputs.GeneratorInputData)
 func (h *InfoExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	experimentSetup, err := parseExperimentSetup(r)
 	if err != nil {
-		writeResponse(w, http.StatusBadRequest, APIResponse{
+		status := http.StatusBadRequest
+		if errors.Is(err, errRequestTooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeResponse(w, status, APIResponse{
 			Errors: []string{err.Error()},
 			Result: "error",
 		})
