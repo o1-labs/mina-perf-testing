@@ -116,8 +116,13 @@ func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.St
 	if err != nil {
 		// Log the error and add to warnings, but don't fail the experiment
 		warningMsg := fmt.Sprintf("Failed to extract Mina executable from deployment metadata: %v. Using existing MinaExec from config.", err)
-		log.Warnf(warningMsg)
-		a.Store.AppendWarningF(warningMsg)
+		// "%s", not the message as the format: both of these are printf-style,
+		// and the wrapped *url.Error carries the manifest URL, whose percent
+		// escapes ("3.3.0%2Balpha1-...") were otherwise read as verbs and
+		// stored as "3.3.0%!B(MISSING)alpha1". It is also a go vet failure
+		// from Go 1.24 on.
+		log.Warnf("%s", warningMsg)
+		a.Store.AppendWarningF("%s", warningMsg)
 	} else {
 		// Update config with the extracted Mina executable path
 		config.MinaExec = minaExecPath
