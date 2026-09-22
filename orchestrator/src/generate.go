@@ -46,7 +46,7 @@ func DefaultGenParams() GenParams {
 		RoundDurationMin:       30,
 		PauseMin:               15,
 		Rounds:                 4,
-		StopsPerRound:          0,
+		StopsPerRound:          2,
 		Gap:                    180,
 		SendFromNonBpsOnly:     false,
 		StopOnlyBps:            false,
@@ -476,9 +476,19 @@ func (p *GenParams) Generate(round int) GeneratedRound {
 		}
 		elapsed += waitSec
 	}
+	// The remainder wait is emitted for every round, the last one included.
+	// Without it the final round scheduled its load and returned at once, so
+	// RunExperiment finished -- and the success webhook fired -- up to
+	// RoundDurationMin minutes before the load it had just scheduled ended,
+	// while RoundInfo still reported the full duration.
+	// The remainder wait is emitted for every round, the last one included.
+	// Without it the final round scheduled its load and returned at once, so
+	// RunExperiment finished -- and the success webhook fired -- up to
+	// RoundDurationMin minutes before the load it had just scheduled ended,
+	// while RoundInfo still reported the full duration.
+	comment1 := fmt.Sprintf("Waiting for remainder of round %d, %s after start", round, formatDur(roundStartMin, elapsed))
+	cmds = append(cmds, withComment(comment1, GenWait(p.RoundDurationMin*60-elapsed)))
 	if round < p.Rounds-1 {
-		comment1 := fmt.Sprintf("Waiting for remainder of round %d, %s after start", round, formatDur(roundStartMin, elapsed))
-		cmds = append(cmds, withComment(comment1, GenWait(p.RoundDurationMin*60-elapsed)))
 		if p.PauseMin > 0 {
 			comment2 := fmt.Sprintf("Pause after round %d, %s after start", round, formatDur(roundStartMin+p.RoundDurationMin, 0))
 			cmds = append(cmds, withComment(comment2, waitMin(p.PauseMin)))

@@ -55,13 +55,13 @@ func (a *App) initializeRoutes() {
 	a.Router.Handle("/api/v0/experiment/cancel", cancelHandler).Methods(http.MethodPost)
 }
 
-// Initialize opens the DB and sets up routes
 // allowPrivateWebhooks mirrors the -allow-private-webhooks flag. It is a
 // package-level switch rather than a config-file field so that the default
 // (refuse private destinations) applies even to a config written before the
 // option existed.
 var allowPrivateWebhooks bool
 
+// Initialize opens the DB and sets up routes.
 func (a *App) Initialize(connStr string, config lib.OrchestratorConfig) {
 	var err error
 	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{})
@@ -99,10 +99,15 @@ func (a *App) Run(address string) {
 
 // isCancellation reports whether err is the operator stopping the experiment
 // rather than the experiment failing. RunExperiment returns the context error
-// unchanged in some paths and wrapped in others, so errors.Is is used rather
-// than an equality check.
+// unchanged in some paths and wrapped in an *OrchestratorError in others, so
+// errors.Is is used rather than an equality check; OrchestratorError.Unwrap
+// makes that reach the cause.
+//
+// DeadlineExceeded is deliberately not treated as a cancel. The experiment
+// context carries no deadline today, but if one is ever added, a run that
+// times out is a failure and must be reported as one.
 func isCancellation(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return errors.Is(err, context.Canceled)
 }
 
 func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.StandardLogger) {
@@ -124,7 +129,10 @@ func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.St
 		// an ordinary error. The operator asked for it, so it is a cancellation
 		// and not a failure: no Errors entry, no error webhook, terminal status
 		// "cancelled".
-		if isCancellation(err) {
+		// The context is checked as well as the error: a step that returns
+		// its own error after the cancel has landed loses the cause, and the
+		// operator still asked for the stop.
+		if isCancellation(err) || config.Ctx.Err() != nil {
 			a.Store.FinishWithCancel()
 			return
 		}
