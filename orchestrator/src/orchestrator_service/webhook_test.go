@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,6 +37,17 @@ func TestValidateWebhookURL(t *testing.T) {
 		{"file scheme", "file:///etc/passwd", false, "scheme"},
 		{"gopher scheme", "gopher://example.com/x", false, "scheme"},
 		{"no host", "http:///justapath", false, "no host"},
+
+		// Ranges net.IP reports as ordinary global unicast. 100.64.0.0/10 is
+		// the one that matters here: several CNI plugins and Tailscale put
+		// pod, service and node addresses in it, and Alibaba's metadata
+		// service lives at 100.100.100.200.
+		{"cgnat", "http://100.64.0.1/x", false, "reserved range"},
+		{"alibaba metadata", "http://100.100.100.200/x", false, "reserved range"},
+		{"ietf protocol assignments", "http://192.0.0.1/x", false, "reserved range"},
+		{"benchmarking", "http://198.18.0.1/x", false, "reserved range"},
+		{"reserved class e", "http://240.0.0.1/x", false, "reserved range"},
+		{"nat64 to loopback", "http://[64:ff9b::7f00:1]/x", false, "loopback"},
 
 		// --- must be accepted ---
 		{"public https", "https://hooks.slack.com/services/T000/B000/XXXX", false, ""},
@@ -84,7 +97,62 @@ func testNotifier() *WebhookNotifier {
 	// httptest servers listen on loopback, which validateWebhookURL refuses by
 	// design, so the delivery tests opt out of the address check only.
 	n.validateURL = func(string) error { return nil }
+	n.checkDialIP = func(net.IP) error { return nil }
 	return n
+}
+
+// TestSendNotificationChecksTheAddressItDials proves the second half of the
+// SSRF guard. validateWebhookURL resolves the name itself, but the transport
+// resolves it again, so a hostile zero-TTL record could answer public for the
+// check and internal for the dial. Here validation is stubbed to accept
+// everything -- standing in for exactly that -- and the connection must still
+// be refused, by Dialer.Control, before any byte is sent.
+func TestSendNotificationChecksTheAddressItDials(t *testing.T) {
+	var reached bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	n := NewWebhookNotifier(logging.Logger("webhook-test"))
+	n.validateURL = func(string) error { return nil } // the check is defeated
+	err := n.SendNotification(context.Background(), srv.URL, WebhookPayload{ExperimentName: "exp-1"})
+	if reached {
+		t.Fatal("the request reached a loopback receiver; the dial-time check did not run")
+	}
+	if err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("err = %v, want a refusal naming the loopback address", err)
+	}
+}
+
+// TestValidateWebhookURLWorksOffline pins that the suite does not need DNS:
+// the resolver is a variable, so a name can be answered from the test.
+func TestValidateWebhookURLWorksOffline(t *testing.T) {
+	saved := lookupIP
+	defer func() { lookupIP = saved }()
+
+	lookupIP = func(host string) ([]net.IP, error) {
+		switch host {
+		case "receiver.example":
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		case "rebind.example":
+			// One answer is public, the other is the metadata service. Any
+			// refused address refuses the whole destination.
+			return []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("169.254.169.254")}, nil
+		}
+		return nil, fmt.Errorf("no such host")
+	}
+
+	if err := validateWebhookURL("https://receiver.example/hook", false); err != nil {
+		t.Fatalf("public name refused: %v", err)
+	}
+	if err := validateWebhookURL("https://rebind.example/hook", false); err == nil {
+		t.Fatal("a name that also resolves to the metadata service must be refused")
+	}
+	if err := validateWebhookURL("https://missing.example/hook", false); err == nil {
+		t.Fatal("a name that does not resolve must be refused")
+	}
 }
 
 // TestSendNotificationPayload asserts the bytes and headers a receiver sees.

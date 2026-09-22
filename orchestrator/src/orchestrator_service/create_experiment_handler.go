@@ -35,6 +35,16 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 		return http.StatusBadRequest, validationErrors, nil
 	}
 
+	// The destination is checked here as well as at delivery. Checking only at
+	// delivery meant a caller who posted an unusable webhook_url got 200, the
+	// experiment ran for hours, and the refusal appeared as one log line long
+	// after the caller had stopped listening.
+	if setup.WebhookURL != nil && *setup.WebhookURL != "" {
+		if err := validateWebhookURL(*setup.WebhookURL, allowPrivateWebhooks); err != nil {
+			return http.StatusBadRequest, []string{err.Error()}, nil
+		}
+	}
+
 	var experimentScript string
 	var experimentInfo lib.ExperimentInfo
 	{
@@ -96,7 +106,11 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 func (h *CreateExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	experimentSetup, err := parseExperimentSetup(r)
 	if err != nil {
-		writeResponse(w, http.StatusBadRequest, APIResponse{
+		status := http.StatusBadRequest
+		if errors.Is(err, errRequestTooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeResponse(w, status, APIResponse{
 			Errors: []string{err.Error()},
 			Result: "error",
 		})

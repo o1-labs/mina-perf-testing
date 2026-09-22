@@ -47,7 +47,7 @@ func DefaultGenParams() GenParams {
 		RoundDurationMin:       30,
 		PauseMin:               15,
 		Rounds:                 4,
-		StopsPerRound:          0,
+		StopsPerRound:          2,
 		Gap:                    180,
 		SendFromNonBpsOnly:     false,
 		StopOnlyBps:            false,
@@ -254,7 +254,10 @@ func SampleTps(baseTps, stressTps float64) float64 {
 	return tpsStddev*math.Abs(gaussRandom()) + baseTps
 }
 
-// SampleStopRatio draws a stop ratio in [minRatio, maxRatio].
+// SampleStopRatio draws a stop ratio in [minRatio, maxRatio], ordering the
+// pair first, so an inverted pair is drawn from rather than escaped from. It
+// does not force the result into [0, 1]: a pair outside the unit range is
+// rejected by ValidationSteps, and clamping here as well would hide that.
 //
 // Both ends are clamped. Clamping only the upper end left the lower end open
 // whenever minRatio > maxRatio: the stddev goes negative and ~0.27% of draws
@@ -500,9 +503,19 @@ func (p *GenParams) Generate(round int) GeneratedRound {
 		}
 		elapsed += waitSec
 	}
+	// The remainder wait is emitted for every round, the last one included.
+	// Without it the final round scheduled its load and returned at once, so
+	// RunExperiment finished -- and the success webhook fired -- up to
+	// RoundDurationMin minutes before the load it had just scheduled ended,
+	// while RoundInfo still reported the full duration.
+	// The remainder wait is emitted for every round, the last one included.
+	// Without it the final round scheduled its load and returned at once, so
+	// RunExperiment finished -- and the success webhook fired -- up to
+	// RoundDurationMin minutes before the load it had just scheduled ended,
+	// while RoundInfo still reported the full duration.
+	comment1 := fmt.Sprintf("Waiting for remainder of round %d, %s after start", round, formatDur(roundStartMin, elapsed))
+	cmds = append(cmds, withComment(comment1, GenWait(p.RoundDurationMin*60-elapsed)))
 	if round < p.Rounds-1 {
-		comment1 := fmt.Sprintf("Waiting for remainder of round %d, %s after start", round, formatDur(roundStartMin, elapsed))
-		cmds = append(cmds, withComment(comment1, GenWait(p.RoundDurationMin*60-elapsed)))
 		if p.PauseMin > 0 {
 			comment2 := fmt.Sprintf("Pause after round %d, %s after start", round, formatDur(roundStartMin+p.RoundDurationMin, 0))
 			cmds = append(cmds, withComment(comment2, waitMin(p.PauseMin)))

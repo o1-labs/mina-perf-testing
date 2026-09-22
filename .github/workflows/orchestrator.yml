@@ -33,3 +33,6 @@ jobs:
       - name: Build Docker image
         run: docker build -t orchestrator:latest .
         working-directory: ./orchestrator
+      - name: Build service Docker image
+        run: docker build -f Dockerfile-service -t orchestrator-service:latest .
+        working-directory: ./orchestrator

@@ -63,6 +63,30 @@ type GeneratorInputData struct {
 	} `json:"fees,omitempty"`
 }
 
+// Redacted returns a copy of the setup that is safe to echo into the
+// generated script's header comment.
+//
+// That comment goes to StoreLogging, i.e. into ExperimentState.Logs, and
+// GET /api/v0/experiment/status serves Logs without authentication. For
+// Slack, Discord and Teams the webhook URL is the credential itself, so it
+// must not travel that path; the private-key paths are dropped for the same
+// reason, at a lower severity.
+// RedactedForLog is the hook lib.EncodeWithContext looks for before it
+// marshals a setup into the generated script's header comment.
+func (inputData *GeneratorInputData) RedactedForLog() any {
+	return inputData.Redacted()
+}
+
+func (inputData *GeneratorInputData) Redacted() *GeneratorInputData {
+	if inputData == nil {
+		return nil
+	}
+	redacted := *inputData
+	redacted.WebhookURL = nil
+	redacted.Privkeys = nil
+	return &redacted
+}
+
 func (inputData *GeneratorInputData) ApplyWithDefaults(p *lib.GenParams) {
 
 	var defaults = lib.DefaultGenParams()
