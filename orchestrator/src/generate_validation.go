@@ -2,6 +2,7 @@ package itn_orchestrator
 
 import (
 	"fmt"
+	"math"
 	"os"
 )
 
@@ -14,8 +15,16 @@ func rangeOfValues(value, min, max float64) bool {
 	return value < min || value > max
 }
 
+// isBetweenZeroAndOneInclusive reports whether value is *outside* [0, 1], the
+// convention every ValidationStep.Check follows: true means invalid.
+//
+// NaN is invalid. Every float comparison against NaN is false, so both
+// `value < 0 || value > 1` here and `MinStopRatio > MaxStopRatio` below passed
+// it through: `-stop-min-ratio NaN` exited 0 and generated a plan with no
+// stop-daemon command in it, which is the silent zero-stop outcome the clamp
+// work set out to remove.
 func isBetweenZeroAndOneInclusive(value float64) bool {
-	return rangeOfValues(value, 0.0, 1.0)
+	return math.IsNaN(value) || rangeOfValues(value, 0.0, 1.0)
 }
 
 type ValidationStep struct {

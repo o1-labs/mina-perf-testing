@@ -38,6 +38,11 @@ RUN apt-get update --quiet --yes \
     libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 
+# The bundled client is a fallback; the service normally takes its mina from the
+# deployed daemon image at run time. The pin must still name packages that exist:
+# `bullseye experimental` (the previous value here) carries no mina-devnet at all,
+# and mina-mesa-mut 4.0.0-rc1-mesa-mut-d7513d4 ships no matching -config. This
+# pair does exist in jammy/alpha, alongside mina-devnet-config of the same version.
 RUN echo "downloading mina" \
   && echo "deb [trusted=yes] https://packages.o1test.net jammy alpha" > /etc/apt/sources.list.d/mina.list \
   && apt-get update --quiet --yes \

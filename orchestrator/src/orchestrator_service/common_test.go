@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	lib "itn_orchestrator"
 )
 
 // TestParseExperimentSetup pins the request-body contract. Both the flat body
@@ -113,7 +117,23 @@ func TestIsCancellation(t *testing.T) {
 		want bool
 	}{
 		{"context canceled", context.Canceled, true},
-		{"deadline exceeded", context.DeadlineExceeded, true},
+		// A run that exceeds a deadline failed; it was not cancelled by the
+		// operator. The experiment context carries no deadline today, so this
+		// pins the intent rather than a live path.
+		{"deadline exceeded", context.DeadlineExceeded, false},
+		{
+			// OrchestratorError.Unwrap is what makes this reachable: every
+			// action except the single BatchAction has its cause flattened
+			// into the message by orchestrator.go, so before the Cause field
+			// an operator cancel was filed as a failure.
+			"wrapped in an OrchestratorError",
+			&lib.OrchestratorError{
+				Message: "Error running step 3: context canceled",
+				Code:    9,
+				Cause:   context.Canceled,
+			},
+			true,
+		},
 		{"wrapped cancel", fmt.Errorf("scheduling batch 3: %w", context.Canceled), true},
 		{"ordinary failure", fmt.Errorf("daemon refused the mutation"), false},
 		{
@@ -126,6 +146,34 @@ func TestIsCancellation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isCancellation(tc.err); got != tc.want {
 				t.Fatalf("isCancellation(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseExperimentSetupReportsOversizeBody pins the size limit and the code
+// it answers with. A chunked request carries ContentLength -1, so the cheap
+// guard passes and http.MaxBytesReader is what stops it; before, that surfaced
+// as "unexpected EOF" and a 400, which names the wrong problem.
+func TestParseExperimentSetupReportsOversizeBody(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		contentLength int64
+	}{
+		{"declared length", int64(2 * 1024 * 1024)},
+		{"chunked, no declared length", -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"experiment_name":"exp-1","comment":"` + strings.Repeat("x", 2*1024*1024) + `"}`
+			req := httptest.NewRequest(http.MethodPost, "/api/v0/experiment/run", strings.NewReader(body))
+			req.ContentLength = tc.contentLength
+
+			_, err := parseExperimentSetup(req)
+			if err == nil {
+				t.Fatal("a 2 MB body was accepted; want it refused")
+			}
+			if !errors.Is(err, errRequestTooLarge) {
+				t.Fatalf("err = %v, want it to match errRequestTooLarge so ServeHTTP answers 413", err)
 			}
 		})
 	}

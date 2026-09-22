@@ -199,7 +199,7 @@ func TestSuccess(t *testing.T) {
 		meta.CreatedAt = req.Data.CreatedAt.Format(time.RFC3339)
 		meta.PeerId = req.Data.PeerId
 		meta.SnarkWork = req.Data.SnarkWork
-		meta.RemoteAddr = "192.0.2.1:1234"
+		meta.RemoteAddr = "192.0.2.1"
 		meta.BlockHash = bhStr
 		meta.Submitter = req.Submitter
 		metaBytes, err2 := json.Marshal(meta)

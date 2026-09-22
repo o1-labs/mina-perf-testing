@@ -1,0 +1,24 @@
+# Local key material. These directories are developer-local and untracked, but
+# `docker build` sends the whole context to the daemon and the Dockerfile does
+# `COPY . .`, so without this file any keys present would be baked into the
+# builder layer of a locally built image.
+keys/
+**/keys/
+**/fund_keys/
+**/fund-keys/
+
+# Build outputs. The image rebuilds these itself; copying them in only risks
+# shipping a stale host-built binary.
+generator
+orchestrator
+orchestrator_service
+src/graphql_generated.go
+result/
+
+# Not needed to build.
+.git
+.gitignore
+.dockerignore
+README.md
+*.test
+*.out

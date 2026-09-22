@@ -33,13 +33,30 @@ primitive inside the cluster:
 | `http://10.0.0.5:9200/...` (RFC1918 / RFC4193) | only with `-allow-private-webhooks` |
 | `http://127.0.0.1:...`, `http://localhost:...` | never |
 | `http://169.254.169.254/...` (cloud metadata) | never |
+| `http://100.64.0.1/...` and other reserved ranges | never |
 | any scheme other than `http`/`https` | never |
 
-A host name is checked against every address it resolves to, and redirects are
-not followed, so a public destination cannot bounce the POST to an internal one.
+A host name is checked against every address it resolves to, the address the
+socket connects to is checked a second time at dial time (so a DNS record that
+answers differently for the two lookups gains nothing), and redirects are not
+followed, so a public destination cannot bounce the POST to an internal one.
+The destination is checked when the experiment is created, so an unusable
+`webhook_url` is a 400 rather than a silent failure hours later.
 
-The URL is treated as a credential: it is never returned by
-`GET /api/v0/experiment/status`, and only its scheme and host are logged.
+The URL is treated as a credential: it is not carried by the `GET
+/api/v0/experiment/status` payload -- neither as a field nor inside the
+generated script comment the logs hold -- and only its scheme and host are
+logged.
+
+### When a notification is sent
+
+One notification is sent per experiment, when the orchestrator has finished
+running it. "Finished" means the generated script has run to its end, and the
+last round waits out its own load, so a success notification means the load has
+been delivered, not only scheduled.
+
+An experiment stopped with `POST /api/v0/experiment/cancel` is not a failure:
+its terminal status is `cancelled` and **no** webhook is sent, of either kind.
 
 ### 2. Webhook Payload Format
 
