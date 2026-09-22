@@ -1,4 +1,14 @@
-FROM golang:1.23.4-bullseye AS builder
+FROM ubuntu:jammy AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=/usr/lib/go-1.23/bin:$PATH
+
+RUN apt-get update --quiet --yes \
+  && apt-get install --quiet --yes --no-install-recommends \
+    ca-certificates \
+    golang-1.23-go \
+    make \
+  && rm -rf /var/lib/apt/lists/*
 
 ARG PSQL_CONNECTION_STRING
 ENV PSQL_CONNECTION_STRING=${PSQL_CONNECTION_STRING}
@@ -7,10 +17,12 @@ ARG CONFIG
 ENV CONFIG=${CONFIG} 
 
 WORKDIR /
+ENV GOFLAGS=-buildvcs=false
 COPY . .
 RUN make orchestrator_service
 
-FROM debian:bullseye AS app
+FROM ubuntu:jammy AS app
+ENV DEBIAN_FRONTEND=noninteractive
 COPY --from=builder /orchestrator_service /orchestrator_service
 
 RUN apt-get update --quiet --yes \
@@ -22,15 +34,20 @@ RUN apt-get update --quiet --yes \
     gnupg2 \
     libgmp10 \
     libgomp1 \
-    libssl1.1 \
+    libssl3 \
     libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 
+# The bundled client is a fallback; the service normally takes its mina from the
+# deployed daemon image at run time. The pin must still name packages that exist:
+# `bullseye experimental` (the previous value here) carries no mina-devnet at all,
+# and mina-mesa-mut 4.0.0-rc1-mesa-mut-d7513d4 ships no matching -config. This
+# pair does exist in jammy/alpha, alongside mina-devnet-config of the same version.
 RUN echo "downloading mina" \
-  && echo "deb [trusted=yes] https://packages.o1test.net bullseye experimental" > /etc/apt/sources.list.d/o1.list \
+  && echo "deb [trusted=yes] https://packages.o1test.net jammy alpha" > /etc/apt/sources.list.d/mina.list \
   && apt-get update --quiet --yes \
-  && apt-get install --quiet --yes --allow-downgrades mina-devnet=3.2.0-alpha1-app-state32-05da85d \
+  && apt-get install --quiet --yes --allow-downgrades \
+    mina-devnet=4.0.0-6965b50 \
   && rm -rf /var/lib/apt/lists/*
 
 ENTRYPOINT [ "/bin/sh", "-c", "/orchestrator_service -conn \"$PSQL_CONNECTION_STRING\" -config \"$CONFIG\" -address \":9090\"" ]
-
