@@ -131,7 +131,7 @@ func SendZkappCommands(config Config, params ZkappCommandParams, output func(Sch
 	if len(params.Nodes) == 0 {
 		return errors.New("no nodes specified")
 	}
-	return scheduleTransactionBatches(
+	_, err := scheduleTransactionBatches(
 		config,
 		"zkapp txs",
 		params.Tps,
@@ -148,6 +148,7 @@ func SendZkappCommands(config Config, params ZkappCommandParams, output func(Sch
 			})
 		},
 	)
+	return err
 }
 
 type ZkappCommandsAction struct{}

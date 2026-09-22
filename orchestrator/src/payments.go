@@ -68,7 +68,7 @@ func schedulePaymentsDo(config Config, params PaymentSubParams, nodeAddress Node
 }
 
 func SchedulePayments(config Config, params PaymentParams, output func(ScheduledPaymentsReceipt)) error {
-	return scheduleTransactionBatches(
+	_, err := scheduleTransactionBatches(
 		config,
 		"payments",
 		params.Tps,
@@ -85,6 +85,7 @@ func SchedulePayments(config Config, params PaymentParams, output func(Scheduled
 			})
 		},
 	)
+	return err
 }
 
 type PaymentsAction struct{}

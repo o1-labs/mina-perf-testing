@@ -138,6 +138,41 @@ func GetGqlClient(config Config, addr NodeAddress) (graphql.Client, *int, error)
 	return entry.Client, entry.LastStatusCode, nil
 }
 
+// GqlRequestError carries the HTTP status a node answered with, so a caller
+// can tell "this node is unwell" from "this request is wrong".
+//
+// Without it every failure looked alike, and a deterministic rejection -- a
+// memo over the 32-character limit, say -- was retried against every node in
+// the cluster before the round gave up.
+type GqlRequestError struct {
+	Node       NodeAddress
+	StatusCode int
+	Err        error
+}
+
+func (e *GqlRequestError) Error() string {
+	if e.StatusCode == 0 {
+		return fmt.Sprintf("request to %s failed: %v", e.Node, e.Err)
+	}
+	return fmt.Sprintf("request to %s failed with status %d: %v", e.Node, e.StatusCode, e.Err)
+}
+
+func (e *GqlRequestError) Unwrap() error { return e.Err }
+
+// Permanent reports whether the same request would be refused by any node.
+//
+// 4xx is the daemon saying the request is wrong, with three exceptions: 408
+// and 429 are load, and 412 is the sequence-number rejection wrapGqlRequest
+// already retries. Anything else, a transport failure included, may be this
+// node alone.
+func (e *GqlRequestError) Permanent() bool {
+	switch e.StatusCode {
+	case 408, 412, 429:
+		return false
+	}
+	return e.StatusCode >= 400 && e.StatusCode < 500
+}
+
 func wrapGqlRequest(config Config, nodeAddress NodeAddress, perform func(client graphql.Client) (any, error)) (any, error) {
 	client, lastCode, err := GetGqlClient(config, nodeAddress)
 	if err != nil {
@@ -154,7 +189,14 @@ func wrapGqlRequest(config Config, nodeAddress NodeAddress, perform func(client 
 		}
 		resp, err = perform(client)
 	}
-	return resp, err
+	if err != nil {
+		code := 0
+		if lastCode != nil {
+			code = *lastCode
+		}
+		return resp, &GqlRequestError{Node: nodeAddress, StatusCode: code, Err: err}
+	}
+	return resp, nil
 }
 
 func SchedulePaymentsGql(config Config, nodeAddress NodeAddress, input PaymentsDetails) (string, error) {
@@ -162,7 +204,7 @@ func SchedulePaymentsGql(config Config, nodeAddress NodeAddress, input PaymentsD
 		return schedulePayments(config.Ctx, client, input)
 	})
 	if err != nil {
-		return "", fmt.Errorf("error scheduling payments to %s: %v", nodeAddress, err)
+		return "", fmt.Errorf("error scheduling payments to %s: %w", nodeAddress, err)
 	}
 	return resp.(*schedulePaymentsResponse).SchedulePayments, nil
 }
@@ -182,7 +224,7 @@ func ScheduleZkappCommands(config Config, nodeAddress NodeAddress, input ZkappCo
 		return scheduleZkappCommands(config.Ctx, client, input)
 	})
 	if err != nil {
-		return "", fmt.Errorf("error scheduling zkapp txs to %s: %v", nodeAddress, err)
+		return "", fmt.Errorf("error scheduling zkapp txs to %s: %w", nodeAddress, err)
 	}
 	return resp.(*scheduleZkappCommandsResponse).ScheduleZkappCommands, nil
 }
