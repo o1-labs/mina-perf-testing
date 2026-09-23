@@ -56,6 +56,10 @@ type Config struct {
 	FundDaemonPorts    []string
 	UrlOverrides       []string
 	PrintRequests      bool
+
+	// AllowUnverifiedMinaExec — see OrchestratorConfig.
+	AllowUnverifiedMinaExec bool
+
 	// ReportStep, when set, is called as each step or batch begins. It exists
 	// so the orchestrator can report progress directly instead of the service
 	// prefix-matching log format strings and type-asserting positional args --

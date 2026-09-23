@@ -101,6 +101,10 @@ func TestCancelDuringWaitIsCancelled(t *testing.T) {
 			}
 
 			cfg := lib.SetupConfig(ctx, lib.OrchestratorConfig{}, logging.Logger("cancel-wait-run"))
+			// The client gate runs before the plan does, and there is no
+			// deployment table here, so without this it refuses and the
+			// experiment is already finished before the cancel lands.
+			cfg.AllowUnverifiedMinaExec = true
 
 			done := make(chan struct{})
 			go func() {

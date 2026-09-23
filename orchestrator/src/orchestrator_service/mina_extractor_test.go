@@ -10,55 +10,46 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 )
 
-// TestProcessReleaseString covers the tags actually in use, not just the one
-// in the doc comment. The old implementation rewrote the second-to-last
-// dash-segment unconditionally, which corrupted any tag whose suffix carries
-// more than "<codename>-<network>".
 func TestProcessReleaseString(t *testing.T) {
-	for _, tc := range []struct {
+	tests := []struct {
 		name    string
 		release string
 		want    string
 	}{
 		{
-			name:    "codename in the expected position",
+			name:    "rewrites a non-jammy codename",
 			release: "3.3.0-alpha1-compatible-90ff48c-bullseye-devnet",
 			want:    "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
 		},
 		{
-			name:    "already the runtime codename",
-			release: "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
-			want:    "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
+			name:    "leaves a jammy tag alone",
+			release: "4.0.0-6965b50-jammy-devnet",
+			want:    "4.0.0-6965b50-jammy-devnet",
 		},
 		{
-			// The tag Dockerfile-service pinned. It contains no codename, so
-			// it must come back untouched; the old code turned the "state32"
-			// segment into the codename.
-			name:    "no codename anywhere is left alone",
-			release: "3.2.0-alpha1-app-state32-05da85d",
-			want:    "3.2.0-alpha1-app-state32-05da85d",
-		},
-		{
-			// The production tag ITN2 ran from. The codename is not
-			// second-to-last, so the old code corrupted the "mesa" segment.
-			name:    "codename followed by a multi-segment suffix",
-			release: "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-bullseye-mesa-mut-generic",
+			// The tag ITN2 ran from 2026-08-27. Rewriting the second-to-last
+			// segment turned this into "…-jammy-mesa-jammy-generic", which does
+			// not exist, and extraction 404'd on an image that was present.
+			name:    "leaves a long suffix intact",
+			release: "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-jammy-mesa-mut-generic",
 			want:    "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-jammy-mesa-mut-generic",
 		},
 		{
-			name:    "short tag with a codename",
-			release: "4.0.0-focal-devnet",
-			want:    "4.0.0-jammy-devnet",
+			name:    "rewrites a codename ahead of a long suffix",
+			release: "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-noble-mesa-mut-generic",
+			want:    "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-jammy-mesa-mut-generic",
 		},
 		{
-			name:    "empty string",
-			release: "",
-			want:    "",
+			name:    "leaves a tag with no codename alone",
+			release: "3.2.0-alpha1-app-state32-05da85d",
+			want:    "3.2.0-alpha1-app-state32-05da85d",
 		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := processReleaseString(tc.release, "jammy"); got != tc.want {
-				t.Fatalf("processReleaseString(%q, \"jammy\") = %q, want %q", tc.release, got, tc.want)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := processReleaseString(tt.release, "jammy"); got != tt.want {
+				t.Errorf("processReleaseString(%q, \"jammy\") = %q, want %q", tt.release, got, tt.want)
 			}
 		})
 	}
@@ -111,7 +102,6 @@ func TestExtractLayerLeavesNoPartialFile(t *testing.T) {
 			"the next run would treat it as a valid cached executable", len(b))
 	}
 
-	// The temporary file must be cleaned up too.
 	matches, _ := filepath.Glob(out + ".tmp-*")
 	if len(matches) != 0 {
 		t.Errorf("temporary files left behind: %v", matches)
