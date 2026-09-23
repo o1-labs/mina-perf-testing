@@ -50,7 +50,26 @@ func scheduleTransactionBatches(
 			actionName, tpsTotal, minTps, len(nodes))
 	}
 
-	feePayersPerNode := len(feePayers) / len(selectedNodes)
+	// Budget keys over the selected nodes *and* the fallbacks up front.
+	// Dividing by len(selectedNodes) alone handed the whole pool to the
+	// selected nodes, and since a failed attempt burns its keys, fallbacks
+	// were then handed len(remFeePayers)/batchCount == 0. The daemon rejects
+	// an empty sender list ("Empty list of senders", "Empty list of fee
+	// payers") and returns it as HTTP 200, so the orchestrator read it as
+	// transient and walked the remaining keyless fallbacks one by one.
+	//
+	// The trade-off is fewer senders per selected node. PaymentKeygenRequirements
+	// budgets roughly ceil(tps/minTps) + 2*tpsGap, i.e. about 2x headroom, so
+	// the reserve fits; if it does not, the fall-back below keeps the previous
+	// behaviour rather than starving the selected nodes.
+	feePayersPerNode := len(feePayers) / (len(selectedNodes) + len(fallbackNodes))
+	if feePayersPerNode == 0 {
+		feePayersPerNode = len(feePayers) / len(selectedNodes)
+	}
+	if feePayersPerNode == 0 {
+		return 0, fmt.Errorf("%s: %d fee payers cannot cover %d selected nodes",
+			actionName, len(feePayers), len(selectedNodes))
+	}
 	remFeePayers := feePayers
 	scheduled := 0.0
 	batchIx := 0
@@ -84,7 +103,11 @@ func scheduleTransactionBatches(
 	// nodes with the same arithmetic, rather than being pushed onto the first
 	// one that answers.
 	remTps := tpsTotal - scheduled
-	for len(fallbackNodes) > 0 && remTps >= minTps {
+	// `remTps >= minTps` alone never entered the loop when tpsTotal < minTps,
+	// which is ~95% of generated payments steps at a high zkapp ratio -- the
+	// shape the issue-#3 clamp makes reachable. A total failure was then
+	// reported correctly but no fallback was ever tried.
+	for len(fallbackNodes) > 0 && remTps > 0 && remTps >= math.Min(minTps, tpsTotal) {
 		batchCount := int(math.Floor(remTps / minTps))
 		if batchCount > len(fallbackNodes) {
 			batchCount = len(fallbackNodes)
@@ -94,6 +117,16 @@ func scheduleTransactionBatches(
 		}
 		fbTps := remTps / float64(batchCount)
 		fbFeePayers := len(remFeePayers) / batchCount
+		if fbFeePayers > feePayersPerNode {
+			fbFeePayers = feePayersPerNode
+		}
+		if fbFeePayers == 0 {
+			// A senderless batch is rejected by the daemon, so walking the
+			// remaining fallbacks would only collect the same refusal.
+			config.Log.Warnf("no fee payers left for %s; %d fallback node(s) not tried, %.6f tps unplaced",
+				actionName, len(fallbackNodes), remTps)
+			break
+		}
 
 		batch := fallbackNodes[:batchCount]
 		fallbackNodes = fallbackNodes[batchCount:]

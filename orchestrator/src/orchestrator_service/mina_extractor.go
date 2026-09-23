@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -90,14 +91,38 @@ var osCodenames = map[string]bool{
 // "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-jammy-mesa-mut-generic" became
 // "…-jammy-mesa-jammy-generic", a tag that does not exist, so extraction 404'd
 // on an image that was sitting in the registry all along.
-func processReleaseString(release string) string {
+// runtimeCodename is the OS codename this process is running on, which is the
+// only distribution whose shared libraries the extracted binary can rely on.
+func runtimeCodename() string {
+	b, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return defaultCodename
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		v, ok := strings.CutPrefix(strings.TrimSpace(line), "VERSION_CODENAME=")
+		if !ok {
+			continue
+		}
+		v = strings.Trim(v, `"`)
+		if osCodenames[v] {
+			return v
+		}
+	}
+	return defaultCodename
+}
+
+// defaultCodename is used when /etc/os-release is unreadable or names a
+// codename we do not know. It matches the service image's base.
+const defaultCodename = "jammy"
+
+func processReleaseString(release, codename string) string {
 	parts := strings.Split(release, "-")
 
 	// Search from the end: the codename sits in the suffix, and an earlier
 	// segment could coincidentally match (a branch named "focal", say).
 	for i := len(parts) - 1; i >= 0; i-- {
 		if osCodenames[parts[i]] {
-			parts[i] = "jammy"
+			parts[i] = codename
 			return strings.Join(parts, "-")
 		}
 	}
@@ -130,6 +155,29 @@ func minaCommit(execPath string) (string, error) {
 	return commit, nil
 }
 
+// smokeTestBinary reports whether an extracted binary can run on this host.
+//
+// The extractor picks an image by codename, but the tag is only a claim: a
+// mismatch produces a binary that dies with "error while loading shared
+// libraries" at exit 127, and because it is cached, every later run returns the
+// same broken file.
+func smokeTestBinary(ctx context.Context, path string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("extracted binary does not run here: %w: %s", err, bytes.TrimSpace(out))
+	}
+	return nil
+}
+
+func (r *registry) verifyBinary(ctx context.Context, path string) error {
+	if r.verify != nil {
+		return r.verify(ctx, path)
+	}
+	return smokeTestBinary(ctx, path)
+}
+
 // getMinaExecutablePath returns the path to the cached Mina executable, extracting it if necessary
 // sanitiseRelease refuses a release tag that would escape the cache directory.
 //
@@ -155,7 +203,7 @@ func getMinaExecutablePath(ctx context.Context, db *gorm.DB, log logging.Standar
 		return "", fmt.Errorf("failed to get deployment release: %w", err)
 	}
 
-	processedRelease := processReleaseString(release)
+	processedRelease := processReleaseString(release, runtimeCodename())
 	if err := sanitiseRelease(processedRelease); err != nil {
 		return "", fmt.Errorf("refusing deployment release: %w", err)
 	}
@@ -190,6 +238,9 @@ type registry struct {
 	service     string
 	repo        string
 	accessToken func(context.Context) (string, error)
+	// verify reports whether an extracted binary can actually run here. It is
+	// a field so tests can inject one; nil means smokeTestBinary.
+	verify func(context.Context, string) error
 }
 
 var defaultRegistry = &registry{
@@ -422,8 +473,11 @@ func (r *registry) extractMinaBinary(ctx context.Context, tag, outputFile string
 		log.Debugf("Processing layer %d/%d: %s", i+1, len(manifest.Layers), layer.Digest)
 		found, deleted, err := r.processLayer(ctx, token, layer.Digest, tempDir, i+1, outputFile, log)
 		if err != nil {
-			log.Warnf("Failed to process layer %d: %v", i+1, err)
-			continue
+			// Not `continue`. Falling through to a lower layer returns a copy
+			// the image has already replaced, and in the real mina-daemon
+			// image the layer below mina is 9.3 GB, so a transient error also
+			// starts a 9.3 GB download into the pod's /tmp.
+			return fmt.Errorf("layer %d/%d (%s): %w", i+1, len(manifest.Layers), layer.Digest, err)
 		}
 		if deleted {
 			// A whiteout entry records that the file was removed in this

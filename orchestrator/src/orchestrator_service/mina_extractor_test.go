@@ -48,8 +48,8 @@ func TestProcessReleaseString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := processReleaseString(tt.release); got != tt.want {
-				t.Errorf("processReleaseString(%q) = %q, want %q", tt.release, got, tt.want)
+			if got := processReleaseString(tt.release, "jammy"); got != tt.want {
+				t.Errorf("processReleaseString(%q, \"jammy\") = %q, want %q", tt.release, got, tt.want)
 			}
 		})
 	}

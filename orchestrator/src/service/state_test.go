@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -237,5 +239,129 @@ func TestLockIsReleasedWhenItsConnectionDies(t *testing.T) {
 	a.pollOrchestratorLock()
 	if !a.HasLock() {
 		t.Fatal("pod A did not take the lock again after it became free")
+	}
+}
+
+// TestCancelReachesTheExperimentContext is the regression test for POST
+// /cancel becoming a no-op.
+//
+// Add takes `cancel context.CancelFunc` as a parameter, and parameters share
+// the function body's scope, so `ctx, cancel := ...` inside it declared only
+// ctx and REASSIGNED cancel to the write timeout's func -- which the defer then
+// fired immediately. s.cancel held a spent CancelFunc for a finished DB write,
+// so nothing ever cancelled the experiment. go vet's lostcancel does not fire
+// on a parameter.
+func TestCancelReachesTheExperimentContext(t *testing.T) {
+	db := testDB(t)
+	db.Exec(`DROP TABLE IF EXISTS experiment_state`)
+	s, err := NewStore(db)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer s.Close()
+
+	expCtx, expCancel := context.WithCancel(context.Background())
+	defer expCancel()
+
+	now := time.Now()
+	if err := s.Add(&ExperimentState{
+		Name: "cancel-reaches-ctx", Status: Running, CreatedAt: now, UpdatedAt: now,
+	}, expCancel); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if err := s.Cancel(); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	select {
+	case <-expCtx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("Cancel() did not reach the experiment context: the run keeps going, " +
+			"the row sits in `cancelling`, and holdsSlot() then 409s every later POST /run")
+	}
+}
+
+// TestReconcileDoesNotReapThisPodsOwnRun: the supervisor reconciles on every
+// lock acquisition, so a connection blip on a single pod re-acquires and
+// reconciles mid-run. The UPDATE is scoped by status alone, so it marked the
+// pod's own live experiment `error`.
+func TestReconcileDoesNotReapThisPodsOwnRun(t *testing.T) {
+	db := testDB(t)
+	db.Exec(`DROP TABLE IF EXISTS experiment_state`)
+	s, err := NewStore(db)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer s.Close()
+
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	now := time.Now()
+	if err := s.Add(&ExperimentState{
+		Name: "my-own-live-run", Status: Running, CreatedAt: now, UpdatedAt: now,
+	}, cancel); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	// An orphan from a previous process, which must still be closed out.
+	old := time.Now().Add(-time.Hour)
+	if err := db.Exec(`INSERT INTO experiment_state (name, status, created_at, updated_at)
+	                   VALUES (?, ?, ?, ?)`, "someone-elses-orphan", string(Running), old, old).Error; err != nil {
+		t.Fatalf("seeding the orphan: %v", err)
+	}
+
+	// What the supervisor does on every re-acquisition.
+	s.reconcileInterruptedExperiments()
+
+	var mine, orphan string
+	db.Raw(`SELECT status FROM experiment_state WHERE name = ?`, "my-own-live-run").Scan(&mine)
+	db.Raw(`SELECT status FROM experiment_state WHERE name = ?`, "someone-elses-orphan").Scan(&orphan)
+
+	if mine != string(Running) {
+		t.Errorf("this pod's own live run was reaped: status = %q, want %q", mine, Running)
+	}
+	if orphan != "error" {
+		t.Errorf("a genuine orphan was not closed out: status = %q, want \"error\"", orphan)
+	}
+}
+
+// TestAppendErrorFDoesNotSetATerminalState: recording an error must not free
+// the slot. Inferring "cancelled" from the message set a terminal status from
+// inside RunExperiment while the worker was still writing, so the outgoing
+// run's flushed comments landed on the next experiment's row.
+func TestAppendErrorFDoesNotSetATerminalState(t *testing.T) {
+	db := testDB(t)
+	db.Exec(`DROP TABLE IF EXISTS experiment_state`)
+	s, err := NewStore(db)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer s.Close()
+
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	now := time.Now()
+	if err := s.Add(&ExperimentState{
+		Name: "still-winding-down", Status: Running, CreatedAt: now, UpdatedAt: now,
+	}, cancel); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	s.AppendErrorF("Error running step 3: %v", context.Canceled)
+
+	got := s.AtomicGet()
+	if got.EndedAt != nil {
+		t.Errorf("AppendErrorF set EndedAt; the terminal state belongs to loadRun, "+
+			"after RunExperiment has returned (status now %q)", got.Status)
+	}
+	if len(got.Errors) == 0 {
+		t.Error("AppendErrorF did not record the error")
+	}
+	// The slot must still be held: a second Add would otherwise start a run
+	// alongside a worker that is still writing to the first one's row.
+	second := &ExperimentState{Name: "the-next-one", Status: Running, CreatedAt: now, UpdatedAt: now}
+	if err := s.Add(second, cancel); !errors.Is(err, ErrExperimentRunning) {
+		t.Errorf("Add during wind-down returned %v, want ErrExperimentRunning", err)
 	}
 }

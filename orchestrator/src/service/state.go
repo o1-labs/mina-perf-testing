@@ -313,6 +313,21 @@ func (s *Store) Close() error {
 // fails with "unsupported Scan, storing driver.Value type []uint8". The same
 // reason updateExperimentInDB marshals Setup by hand on the way out.
 func (s *Store) reconcileInterruptedExperiments() {
+	// The UPDATE below is scoped by status alone, and ExperimentState carries
+	// no instance, host or pid column to scope it by. The supervisor
+	// reconciles on every acquisition, so a single pod whose lock connection
+	// blips re-acquires and marks its OWN running experiment `error`; the next
+	// log line then writes `running` back from memory and erases the
+	// interruption note. Excluding the run this process is driving closes both
+	// that and the rolling-update case where B adds an experiment before
+	// taking the lock.
+	s.mu.Lock()
+	own := ""
+	if s.experiment != nil && s.experiment.EndedAt == nil {
+		own = s.experiment.Name
+	}
+	s.mu.Unlock()
+
 	const note = "Experiment interrupted: the orchestrator restarted while this run was in progress"
 
 	// RETURNING name so the log names what was lost. Selecting a text column
@@ -324,8 +339,8 @@ func (s *Store) reconcileInterruptedExperiments() {
 		    ended_at = now(),
 		    updated_at = now(),
 		    errors = array_append(coalesce(errors, ARRAY[]::text[]), ?)
-		WHERE status IN (?, ?)
-		RETURNING name`, note, string(Running), string(Cancelling)).Scan(&names).Error
+		WHERE status IN (?, ?) AND name <> ?
+		RETURNING name`, note, string(Running), string(Cancelling), own).Scan(&names).Error
 	if err != nil {
 		log.Printf("Error closing out interrupted experiments: %v", err)
 		return
@@ -514,9 +529,18 @@ func (s *Store) Add(experiment *ExperimentState, cancel context.CancelFunc) erro
 	// also serialises AtomicGet and Cancel: an unbounded write against a hung
 	// Postgres would block GET /status and POST /cancel with it, and a
 	// liveness probe on the status endpoint would then restart the pod.
-	ctx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	if err := s.WriteExperimentToDBContext(ctx, *experiment); err != nil {
+	//
+	// writeCtx/cancelWrite, not ctx/cancel: `cancel` is a PARAMETER, and
+	// parameters share the function body's scope, so `ctx, cancel := ...`
+	// declares only ctx and *reassigns* cancel. That replaced the
+	// experiment's CancelFunc with the write timeout's, which the defer then
+	// fired immediately -- POST /cancel became a no-op, the row sat in
+	// `cancelling`, holdsSlot() counts Cancelling so every later POST /run
+	// returned 409, and the run ended with FinishWithSuccess overwriting the
+	// status to success. go vet's lostcancel does not fire on a parameter.
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), dbWriteTimeout)
+	defer cancelWrite()
+	if err := s.WriteExperimentToDBContext(writeCtx, *experiment); err != nil {
 		return fmt.Errorf("failed to write experiment to database: %w", err)
 	}
 	s.experiment = experiment
@@ -588,13 +612,20 @@ func (s *Store) AppendWarningF(format string, args ...interface{}) error {
 func (s *Store) AppendErrorF(format string, args ...interface{}) error {
 	message := fmt.Sprintf(format, args...)
 	s.AtomicSet(func(experiment *ExperimentState) {
-		if strings.Contains(message, "context canceled") {
-			experiment.Status = Cancelled
-			now := time.Now()
-			experiment.EndedAt = &now
-		} else {
-			experiment.Errors = append(experiment.Errors, message)
-		}
+		// Errors are recorded, never interpreted. This used to string-match
+		// "context canceled" and set a terminal status from inside
+		// RunExperiment, which freed the slot while the worker goroutine was
+		// still writing: the outgoing run's deferred comment flush then landed
+		// on a freshly-Added row and marked *that* one cancelled, and rows came
+		// out with updated_at > ended_at.
+		//
+		// The terminal state is now set exactly once, by loadRun, after
+		// RunExperiment has returned -- FinishWithCancel for a cancellation,
+		// FinishWithError otherwise. The cost is that holdsSlot() stays true
+		// until the worker finishes, so a second Add during that window
+		// returns ErrExperimentRunning rather than starting alongside it,
+		// which is the safer of the two.
+		experiment.Errors = append(experiment.Errors, message)
 	})
 	return nil
 }
