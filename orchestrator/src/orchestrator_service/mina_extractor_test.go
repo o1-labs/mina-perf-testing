@@ -22,18 +22,18 @@ func TestProcessReleaseString(t *testing.T) {
 	}{
 		{
 			name:    "codename in the expected position",
-			release: "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
-			want:    "3.3.0-alpha1-compatible-90ff48c-bullseye-devnet",
+			release: "3.3.0-alpha1-compatible-90ff48c-bullseye-devnet",
+			want:    "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
 		},
 		{
-			name:    "already bullseye",
-			release: "3.3.0-alpha1-compatible-90ff48c-bullseye-devnet",
-			want:    "3.3.0-alpha1-compatible-90ff48c-bullseye-devnet",
+			name:    "already the runtime codename",
+			release: "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
+			want:    "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
 		},
 		{
 			// The tag Dockerfile-service pinned. It contains no codename, so
 			// it must come back untouched; the old code turned the "state32"
-			// segment into "bullseye".
+			// segment into the codename.
 			name:    "no codename anywhere is left alone",
 			release: "3.2.0-alpha1-app-state32-05da85d",
 			want:    "3.2.0-alpha1-app-state32-05da85d",
@@ -42,13 +42,13 @@ func TestProcessReleaseString(t *testing.T) {
 			// The production tag ITN2 ran from. The codename is not
 			// second-to-last, so the old code corrupted the "mesa" segment.
 			name:    "codename followed by a multi-segment suffix",
-			release: "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-jammy-mesa-mut-generic",
-			want:    "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-bullseye-mesa-mut-generic",
+			release: "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-bullseye-mesa-mut-generic",
+			want:    "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-jammy-mesa-mut-generic",
 		},
 		{
 			name:    "short tag with a codename",
 			release: "4.0.0-focal-devnet",
-			want:    "4.0.0-bullseye-devnet",
+			want:    "4.0.0-jammy-devnet",
 		},
 		{
 			name:    "empty string",
@@ -57,8 +57,8 @@ func TestProcessReleaseString(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := processReleaseString(tc.release); got != tc.want {
-				t.Fatalf("processReleaseString(%q) = %q, want %q", tc.release, got, tc.want)
+			if got := processReleaseString(tc.release, "jammy"); got != tc.want {
+				t.Fatalf("processReleaseString(%q, \"jammy\") = %q, want %q", tc.release, got, tc.want)
 			}
 		})
 	}
@@ -95,7 +95,7 @@ func tarWithShortEntry(t *testing.T, name string, declared int64, actual int) st
 func TestExtractLayerLeavesNoPartialFile(t *testing.T) {
 	const target = "usr/local/bin/mina"
 	layer := tarWithShortEntry(t, target, 1000, 400)
-	out := filepath.Join(t.TempDir(), "mina-3.3.0-bullseye-devnet")
+	out := filepath.Join(t.TempDir(), "mina-3.3.0-jammy-devnet")
 
 	found, err := extractLayer(layer, out, logging.Logger("extractor-test"))
 	if err == nil {
@@ -143,7 +143,7 @@ func TestExtractLayerSuccessIsExecutable(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	out := filepath.Join(t.TempDir(), "mina-3.3.0-bullseye-devnet")
+	out := filepath.Join(t.TempDir(), "mina-3.3.0-jammy-devnet")
 	found, err := extractLayer(layer, out, logging.Logger("extractor-test"))
 	if err != nil || !found {
 		t.Fatalf("extractLayer = (%v, %v), want (true, nil)", found, err)

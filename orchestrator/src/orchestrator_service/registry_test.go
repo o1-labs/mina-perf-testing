@@ -62,6 +62,11 @@ type fakeRegistry struct {
 	// names -- the shape a stale cache or a tampering proxy produces, and the
 	// one that is invisible without a digest check.
 	corruptBlob []byte
+	// corruptOnlyTop restricts corruptBlob to the topmost layer. Without it
+	// every blob is corrupted, so a test cannot tell "the walk stopped at the
+	// bad layer" from "every layer was bad", and a fall-through to a lower
+	// layer stays invisible.
+	corruptOnlyTop bool
 
 	sawBasicUser string
 	srv          *httptest.Server
@@ -85,6 +90,11 @@ func (f *fakeRegistry) start() *registry {
 	byDigest := map[string][]byte{}
 	for _, layer := range f.layers {
 		byDigest[digestOf(layer)] = layer
+	}
+	// The topmost layer is the last entry: a manifest lists layers base first.
+	topDigest := ""
+	if len(f.layers) > 0 {
+		topDigest = digestOf(f.layers[len(f.layers)-1])
 	}
 
 	manifestBody := func() []byte {
@@ -132,7 +142,7 @@ func (f *fakeRegistry) start() *registry {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			if f.corruptBlob != nil {
+			if f.corruptBlob != nil && (!f.corruptOnlyTop || digest == topDigest) {
 				w.Write(f.corruptBlob)
 				return
 			}
