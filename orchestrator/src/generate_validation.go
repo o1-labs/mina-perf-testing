@@ -74,6 +74,24 @@ func ValidationSteps(p *GenParams) []ValidationStep {
 			},
 			ExitCode: 2,
 		},
+		// Note: non-default-token is deliberately NOT rejected together with
+		// max-cost-mixed. Generate() computes max-cost per round, so only the
+		// odd (stress) rounds run max-cost commands; the even rounds run
+		// ordinary zkApp load that does honour the custom token.
+		{
+			ErrorMsg: "non-default-token has no effect with max-cost (max-cost commands always use the default token)",
+			Check: func(p *GenParams) bool {
+				return p.NonDefaultToken && p.MaxCost
+			},
+			ExitCode: 2,
+		},
+		{
+			ErrorMsg: "non-default-token requires a non-zero zkapp ratio (it only affects the zkApp load)",
+			Check: func(p *GenParams) bool {
+				return p.NonDefaultToken && p.ZkappRatio < 1e-3
+			},
+			ExitCode: 2,
+		},
 		{
 			// Without this, rounds = 0 passes validation and POST /run starts
 			// an "experiment" that is only the funding preamble, completes

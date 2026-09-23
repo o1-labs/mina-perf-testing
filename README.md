@@ -69,6 +69,10 @@ docker push o1labs/mina-perf-testing:internal-trace-consumer
 - [./fetcher-infra-tmp](./fetcher-infra-tmp)
   - Temporary solution before it will be merged with the standard K8S deployment.
 
+The log fetcher now rotates per-node consumer logs instead of appending forever.
+By default, `consumer-stdout.log` and `consumer-stderr.log` rotate at `10 MiB` and keep `5` archived files.
+You can override that with `CONSUMER_LOG_ROTATION_SIZE_BYTES` and `CONSUMER_LOG_ROTATION_COUNT`.
+
 ### Dashboard
 
 The dashboard for the target network monitoring and performance analysis.

@@ -212,6 +212,8 @@ func testPayment(t *testing.T, numFeePayers int, feePayerBalance int64, pi Payme
 func TestGenerate(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		params := someParams()
+		// Exercise both settings of the custom-token option.
+		params.NonDefaultToken = i%2 == 1
 		for r := 0; r < params.Rounds; r++ {
 			round := params.Generate(r)
 			var zkappParams *ZkappSubParams
@@ -226,6 +228,22 @@ func TestGenerate(t *testing.T) {
 				}
 			}
 			if zkappParams != nil {
+				// The option must reach the zkApp sub-params, the wire
+				// payload and the round summary unchanged, in every round
+				// -- including the max-cost rounds that max-cost-mixed
+				// introduces on odd round numbers.
+				if zkappParams.NonDefaultToken != params.NonDefaultToken {
+					t.Errorf("round %d: ZkappSubParams.NonDefaultToken = %v, want %v",
+						r, zkappParams.NonDefaultToken, params.NonDefaultToken)
+				}
+				if got := ZkappPaymentsInput(*zkappParams, 0, zkappParams.Tps).NonDefaultToken; got != params.NonDefaultToken {
+					t.Errorf("round %d: ZkappCommandsDetails.NonDefaultToken = %v, want %v",
+						r, got, params.NonDefaultToken)
+				}
+				if round.RoundInfo.NonDefaultToken != params.NonDefaultToken {
+					t.Errorf("round %d: RoundInfo.NonDefaultToken = %v, want %v",
+						r, round.RoundInfo.NonDefaultToken, params.NonDefaultToken)
+				}
 				fund := *round.ZkappFundCommand
 				participants := int(zkappParams.Tps / zkappParams.MinTps)
 				tpsPerNode := zkappParams.Tps / float64(participants)

@@ -217,9 +217,9 @@ func (SampleAction) Name() string { return "sample" }
 
 var _ Action = SampleAction{}
 
-func selectNodes(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddress) {
+func selectNodesWithFallback(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddress, []NodeAddress) {
 	if len(nodes) == 0 {
-		return tps, nodes // Return empty slice if no nodes available
+		return tps, nodes, nil // Return empty slice if no nodes available
 	}
 
 	nodesF := math.Floor(tps / minTps)
@@ -232,12 +232,29 @@ func selectNodes(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddre
 	}
 
 	if nodesMax >= len(nodes) {
-		return tps / float64(len(nodes)), nodes
+		return tps / float64(len(nodes)), nodes, nil
 	}
 	rand.Shuffle(len(nodes), func(i, j int) {
 		nodes[i], nodes[j] = nodes[j], nodes[i]
 	})
-	return tps / nodesF, nodes[:nodesMax]
+	return tps / nodesF, nodes[:nodesMax], nodes[nodesMax:]
+}
+
+// sleepOrCancel waits for d, or returns as soon as the context is cancelled.
+//
+// A bare time.Sleep in a retry loop is unreachable by POST /experiment/cancel:
+// the longest single pause here is 8 minutes and in DiscoverParticipants it is
+// 20, and the check at the top of each iteration does nothing while the sleep
+// is in progress. The operator asked for the run to stop, so it stops.
+func sleepOrCancel(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func retryOnMultipleServers(servers []string, ctx context.Context, serverIx int, commandName string, log logging.StandardLogger, try func(string) error) (err error) {
@@ -258,7 +275,9 @@ func retryOnMultipleServers(servers []string, ctx context.Context, serverIx int,
 		}
 		if retryPause <= 8 {
 			log.Warnf("Failed to run %s command, retrying in %d minutes: %s", commandName, retryPause, err)
-			time.Sleep(time.Duration(retryPause) * time.Minute)
+			if err := sleepOrCancel(ctx, time.Duration(retryPause)*time.Minute); err != nil {
+				return err
+			}
 		}
 		if len(servers) > 0 {
 			serverIx = (serverIx + 1) % len(servers)
