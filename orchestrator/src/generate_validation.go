@@ -2,6 +2,7 @@ package itn_orchestrator
 
 import (
 	"fmt"
+	"math"
 	"os"
 )
 
@@ -14,8 +15,16 @@ func rangeOfValues(value, min, max float64) bool {
 	return value < min || value > max
 }
 
+// isBetweenZeroAndOneInclusive reports whether value is *outside* [0, 1], the
+// convention every ValidationStep.Check follows: true means invalid.
+//
+// NaN is invalid. Every float comparison against NaN is false, so both
+// `value < 0 || value > 1` here and `MinStopRatio > MaxStopRatio` below passed
+// it through: `-stop-min-ratio NaN` exited 0 and generated a plan with no
+// stop-daemon command in it, which is the silent zero-stop outcome the clamp
+// work set out to remove.
 func isBetweenZeroAndOneInclusive(value float64) bool {
-	return rangeOfValues(value, 0.0, 1.0)
+	return math.IsNaN(value) || rangeOfValues(value, 0.0, 1.0)
 }
 
 type ValidationStep struct {
@@ -43,6 +52,21 @@ func ValidationSteps(p *GenParams) []ValidationStep {
 		simpleRangeCheck(p.StopCleanRatio, "stop-clean ratio"),
 		simpleRangeCheck(p.MaxCostMixedTpsRatio, "max-cost-mixed ratio"),
 		simpleRangeCheck(p.RotationRatio, "rotation ratio"),
+		{
+			// simpleRangeCheck tests each ratio against [0,1] independently,
+			// so an inverted pair passes it. That makes SampleStopRatio's
+			// stddev negative, and ~0.27% of draws come back below zero
+			// (measured: 5390/2000000, low of -0.65). Both derived ratios
+			// then go negative, every `> 1e-6` guard in generate.go fails,
+			// and the round emits no stop command at all -- a misconfigured
+			// experiment silently performs zero node stops instead of
+			// erroring.
+			ErrorMsg: "min stop ratio must not exceed max stop ratio",
+			Check: func(p *GenParams) bool {
+				return p.MinStopRatio > p.MaxStopRatio
+			},
+			ExitCode: 2,
+		},
 		{
 			ErrorMsg: "both max-cost-mixed and max-cost specified",
 			Check: func(p *GenParams) bool {

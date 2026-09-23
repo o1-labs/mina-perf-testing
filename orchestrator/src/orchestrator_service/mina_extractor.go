@@ -394,6 +394,8 @@ type indexEntry struct {
 func (r *registry) manifest(ctx context.Context, token, reference string, log logging.StandardLogger) (*Manifest, error) {
 	manifestURL := fmt.Sprintf("%s/v2/%s/manifests/%s", r.baseURL, r.repo, reference)
 
+	log.Infof("Fetching image manifest: url=%s reference=%s", manifestURL, reference)
+
 	req, err := http.NewRequestWithContext(ctx, "GET", manifestURL, nil)
 	if err != nil {
 		return nil, err
@@ -408,7 +410,7 @@ func (r *registry) manifest(ctx context.Context, token, reference string, log lo
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("manifest request failed with status: %s (url=%s)", resp.Status, manifestURL)
+		return nil, fmt.Errorf("manifest request failed with status: %s (url=%s, reference=%s)", resp.Status, manifestURL, reference)
 	}
 
 	body, err := io.ReadAll(resp.Body)

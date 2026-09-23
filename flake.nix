@@ -13,10 +13,10 @@
     {
       devShells.${system}.default = pkgs.mkShell {
         name = "mina-perf-testing";
-        buildInputs = with pkgs; [ 
-          stdenv 
-          go 
-          glibc 
+        buildInputs = with pkgs; [
+          stdenv
+          go
+          glibc
         ];
       };
     };

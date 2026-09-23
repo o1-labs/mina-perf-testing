@@ -190,12 +190,26 @@ func (SampleAction) Run(config Config, rawParams json.RawMessage, output OutputF
 	rand.Shuffle(groupLen, func(i, j int) {
 		group[i], group[j] = group[j], group[i]
 	})
+	// Round cumulative boundaries rather than each ratio independently.
+	//
+	// Rounding each ratio against the original groupLen made every
+	// over-allocation fall on the last bucket: {0.2 x5} over 8 nodes gave
+	// [2 2 2 2 0], so the fifth group got nothing where its share is 1.6.
+	// Cumulative boundaries give [2 1 2 1 2]. The invariant prev <= end <=
+	// groupLen then holds by construction -- cum is non-decreasing because
+	// ratios are validated non-negative -- so the slicing cannot go out of
+	// range; the clamp below is kept only as a guard on the sum.
+	cum, prev := 0.0, 0
 	for i, r := range params.Ratios {
-		take := int(math.Round(r * float64(groupLen)))
-		output(fmt.Sprintf("group%d", i+1), group[:take], false, false)
-		group = group[take:]
+		cum += r
+		end := int(math.Round(cum * float64(groupLen)))
+		if end > groupLen {
+			end = groupLen
+		}
+		output(fmt.Sprintf("group%d", i+1), group[prev:end], false, false)
+		prev = end
 	}
-	output("rest", group, false, false)
+	output("rest", group[prev:], false, false)
 	return nil
 }
 
