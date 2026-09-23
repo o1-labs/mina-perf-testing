@@ -111,7 +111,20 @@ func isCancellation(err error) bool {
 }
 
 func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.StandardLogger) {
-	if err := lib.RunExperiment(inDecoder, config, log); err != nil {
+	err := lib.RunExperiment(inDecoder, config, log)
+
+	// A cancel is not always an error. RunActions returns *nil* when it sees
+	// ctx.Done between steps (orchestrator.go), so a cancel landing during a
+	// WaitAction -- a plain time.Sleep, and the last round now ends with one
+	// lasting up to RoundDurationMin -- reached FinishWithSuccess and fired the
+	// success webhook. The operator cancelled and the receiver was told the
+	// experiment succeeded.
+	if err == nil && config.Ctx.Err() != nil {
+		a.Store.FinishWithCancel()
+		return
+	}
+
+	if err != nil {
 		// POST /cancel cancels the experiment context, which surfaces here as
 		// an ordinary error. The operator asked for it, so it is a cancellation
 		// and not a failure: no Errors entry, no error webhook, terminal status
