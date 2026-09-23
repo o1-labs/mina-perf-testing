@@ -17,8 +17,15 @@ func schedTestConfig() Config {
 	return Config{Log: logging.Logger("scheduling-test")}
 }
 
+// schedTestFeePayers returns DISTINCT keys. Zero-value keys make reuse and
+// starvation invisible: every element compares equal, so a node handed the same
+// key twice, or a batch handed an empty slice, reads the same as a correct run.
 func schedTestFeePayers(n int) []itn_json_types.MinaPrivateKey {
-	return make([]itn_json_types.MinaPrivateKey, n)
+	keys := make([]itn_json_types.MinaPrivateKey, n)
+	for i := range keys {
+		keys[i] = itn_json_types.MinaPrivateKey(fmt.Sprintf("key-%03d", i))
+	}
+	return keys
 }
 
 // TestScheduleAllNodesFailReturnsError is the regression test for a load run
@@ -340,5 +347,98 @@ func TestRetryOnMultipleServersStopsOnCancel(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Errorf("attempts = %d, want 1: no further attempt after the cancel", attempts)
+	}
+}
+
+// daemonLikeSchedule models what the daemon actually does with an empty sender
+// list: mina_graphql.ml answers "Empty list of senders" / "Empty list of fee
+// payers", and graphql_internal.ml returns GraphQL errors as HTTP 200 -- so the
+// orchestrator sees a plain transient error, not a 4xx.
+//
+// The previous mocks accepted an empty slice, which is why a scheduler that
+// handed fallbacks zero keys still looked like a success.
+// failFirstCalls rather than failing named nodes: selectNodesWithFallback
+// shuffles the node slice in place, so "the first N nodes are down" is not
+// reproducible from the caller's ordering. Failing the first N *calls* models
+// the same situation and is deterministic.
+func daemonLikeSchedule(failFirstCalls int) (scheduleBatchFunc, *[]int) {
+	var keyCounts []int
+	calls := 0
+	f := func(n NodeAddress, _ int, _ float64, keys []itn_json_types.MinaPrivateKey) (string, error) {
+		keyCounts = append(keyCounts, len(keys))
+		calls++
+		if len(keys) == 0 {
+			return "", errors.New("Empty list of senders")
+		}
+		if calls <= failFirstCalls {
+			return "", errors.New("connection refused")
+		}
+		return "handle-" + string(n), nil
+	}
+	return f, &keyCounts
+}
+
+func nodesNamed(n int) []NodeAddress {
+	out := make([]NodeAddress, n)
+	for i := range out {
+		out[i] = NodeAddress(fmt.Sprintf("node-%02d", i))
+	}
+	return out
+}
+
+// TestScheduleNeverSendsASenderlessBatch is the regression test for fallback
+// nodes being handed zero fee payers.
+//
+// feePayersPerNode was len(feePayers)/len(selectedNodes), so the selected nodes
+// consumed the whole pool; a failed attempt burns its keys, and the fallbacks
+// were then handed len(remFeePayers)/batchCount == 0. Against the real daemon
+// every one of those is rejected, so the fallback path was dead.
+func TestScheduleNeverSendsASenderlessBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		nodes, keys    int
+		tpsTotal       float64
+		minTps         float64
+		failFirst      int
+		wantSomePlaced bool
+	}{
+		{"20 nodes, 40 keys, first 10 fail", 20, 40, 10, 1, 10, true},
+		{"20 nodes, 40 keys, first 5 fail", 20, 40, 10, 1, 5, true},
+		{"tps below minTps", 20, 40, 0.003, 0.01, 0, true},
+		{"tight key budget", 3, 7, 0.0092, 0.01, 0, true},
+		// The loop-entry half: with tpsTotal < minTps the fallback loop was
+		// never entered at all, so when the one selected node failed there was
+		// nowhere for the load to go. ~95% of generated payments steps at a
+		// high zkapp ratio have this shape.
+		{"tps below minTps and the selected node fails", 20, 40, 0.003, 0.01, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nodes := nodesNamed(tc.nodes)
+			sched, keyCounts := daemonLikeSchedule(tc.failFirst)
+
+			placed, err := scheduleTransactionBatches(
+				schedTestConfig(), "payments", tc.tpsTotal, tc.minTps, nodes,
+				schedTestFeePayers(tc.keys), sched, func(NodeAddress, string) {})
+
+			for i, c := range *keyCounts {
+				if c == 0 {
+					t.Fatalf("call %d was made with 0 fee payers; the daemon rejects that "+
+						"(\"Empty list of senders\") and returns it as HTTP 200, so the "+
+						"orchestrator treats it as transient and walks the rest keyless. "+
+						"key counts: %v", i, *keyCounts)
+				}
+			}
+			if tc.wantSomePlaced && placed <= 0 {
+				t.Errorf("placed = %v with err = %v; want some load placed. "+
+					"calls: %d, key counts %v", placed, err, len(*keyCounts), *keyCounts)
+			}
+			// When the selected nodes failed, a fallback must actually have
+			// been attempted rather than the loop being skipped entirely.
+			if tc.failFirst > 0 && len(*keyCounts) <= tc.failFirst {
+				t.Errorf("only %d schedule call(s) made for %d failing node(s); "+
+					"no fallback was tried. key counts: %v",
+					len(*keyCounts), tc.failFirst, *keyCounts)
+			}
+		})
 	}
 }

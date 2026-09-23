@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -78,28 +80,60 @@ var osCodenames = map[string]bool{
 	"focal": true, "jammy": true, "noble": true,
 }
 
-// processReleaseString rewrites a release tag to its jammy build.
+// runtimeCodename is the OS codename this process is running on, which is the
+// only distribution whose shared libraries the extracted binary can rely on.
+//
+// Hard-coding "bullseye" while the service image is ubuntu:jammy produced a
+// binary that linked against libssl.so.1.1, libcrypto.so.1.1 and libffi.so.7,
+// none of which exist on jammy, so every exec of it failed with
+// "error while loading shared libraries", exit 127. It also rewrote tags that
+// already existed -- 4.0.0-6965b50-jammy-devnet became a -bullseye-devnet tag
+// that 404s -- and only 276 of 1465 bullseye tags have a jammy twin.
+func runtimeCodename() string {
+	b, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return defaultCodename
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		v, ok := strings.CutPrefix(strings.TrimSpace(line), "VERSION_CODENAME=")
+		if !ok {
+			continue
+		}
+		v = strings.Trim(v, `"`)
+		if osCodenames[v] {
+			return v
+		}
+	}
+	return defaultCodename
+}
+
+// defaultCodename is used when /etc/os-release is unreadable or names a
+// codename we do not know. It matches the service image's base.
+const defaultCodename = "jammy"
+
+// processReleaseString rewrites a release tag to the codename this process
+// runs on.
 //
 // Only a segment that actually names an OS codename is rewritten. Rewriting
 // the second-to-last segment unconditionally assumed every tag ends in
 // "<codename>-<network>", which most do not:
 //
 //	3.2.0-alpha1-app-state32-05da85d
-//	  -> 3.2.0-alpha1-app-jammy-05da85d         (corrupted)
-//	3.4.0-alpha1-mesa-mut-prefork-cac0e3e-jammy-mesa-mut-generic
-//	  -> ...-jammy-mesa-jammy-generic           (corrupted)
+//	  -> 3.2.0-alpha1-app-bullseye-05da85d      (corrupted)
+//	3.4.0-alpha1-mesa-mut-prefork-cac0e3e-bullseye-mesa-mut-generic
+//	  -> ...-bullseye-mesa-bullseye-generic     (corrupted)
 //
 // A corrupted tag 404s at the manifest fetch, and the caller then warns and
 // silently falls back to the bundled client -- so the feature was a no-op on
 // the tags actually in use.
-func processReleaseString(release string) string {
+func processReleaseString(release, codename string) string {
 	parts := strings.Split(release, "-")
 
 	// Search from the end: the codename sits in the suffix, and an earlier
 	// segment could coincidentally match (a branch named "focal", say).
 	for i := len(parts) - 1; i >= 0; i-- {
 		if osCodenames[parts[i]] {
-			parts[i] = "jammy"
+			parts[i] = codename
 			return strings.Join(parts, "-")
 		}
 	}
@@ -125,6 +159,30 @@ func sanitiseRelease(release string) error {
 	return nil
 }
 
+// smokeTestBinary reports whether an extracted binary can run on this host.
+//
+// The extractor picks an image by codename, but the tag is only a claim: a
+// mismatch produces a binary that dies with "error while loading shared
+// libraries" at exit 127, and because it is cached, every later run returns
+// the same broken file. Running it once, here, turns that into a clean error
+// so loadRun can fall back to the bundled client.
+func smokeTestBinary(ctx context.Context, path string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("extracted binary does not run here: %w: %s", err, bytes.TrimSpace(out))
+	}
+	return nil
+}
+
+func (r *registry) verifyBinary(ctx context.Context, path string) error {
+	if r.verify != nil {
+		return r.verify(ctx, path)
+	}
+	return smokeTestBinary(ctx, path)
+}
+
 // getMinaExecutablePath returns the path to the cached Mina executable,
 // extracting it if necessary.
 func getMinaExecutablePath(ctx context.Context, db *gorm.DB, log logging.StandardLogger) (string, error) {
@@ -133,7 +191,7 @@ func getMinaExecutablePath(ctx context.Context, db *gorm.DB, log logging.Standar
 		return "", fmt.Errorf("failed to get deployment release: %w", err)
 	}
 
-	processedRelease := processReleaseString(release)
+	processedRelease := processReleaseString(release, runtimeCodename())
 	if err := sanitiseRelease(processedRelease); err != nil {
 		return "", fmt.Errorf("refusing deployment release: %w", err)
 	}
@@ -146,13 +204,31 @@ func getMinaExecutablePath(ctx context.Context, db *gorm.DB, log logging.Standar
 	executablePath := filepath.Join(cacheDir, executableName)
 
 	if _, err := os.Stat(executablePath); err == nil {
-		log.Infof("Using cached Mina executable: %s", executableName)
-		return filepath.Abs(executablePath)
+		// Re-verify on a cache hit. A binary cached before this check existed,
+		// or one whose host libraries have since changed, is still unusable.
+		if verr := defaultRegistry.verifyBinary(ctx, executablePath); verr != nil {
+			log.Warnf("Evicting cached Mina executable %s: %v", executableName, verr)
+			if rerr := os.Remove(executablePath); rerr != nil {
+				return "", fmt.Errorf("cached mina binary is unusable and could not be evicted: %w", rerr)
+			}
+		} else {
+			log.Infof("Using cached Mina executable: %s", executableName)
+			return filepath.Abs(executablePath)
+		}
 	}
 
 	log.Infof("Extracting Mina executable from image %s:%s", defaultRegistry.repo, processedRelease)
 	if err := defaultRegistry.extractMinaBinary(ctx, processedRelease, executablePath, log); err != nil {
 		return "", fmt.Errorf("failed to extract mina binary: %w", err)
+	}
+
+	// Verify before handing the path out. On failure the file is removed, so a
+	// later run re-extracts rather than serving the same broken binary.
+	if err := defaultRegistry.verifyBinary(ctx, executablePath); err != nil {
+		if rerr := os.Remove(executablePath); rerr != nil {
+			log.Warnf("Could not remove unusable extracted binary %s: %v", executablePath, rerr)
+		}
+		return "", fmt.Errorf("extracted mina binary is unusable: %w", err)
 	}
 
 	return filepath.Abs(executablePath)
@@ -168,6 +244,9 @@ type registry struct {
 	service     string
 	repo        string
 	accessToken func(context.Context) (string, error)
+	// verify reports whether an extracted binary can actually run here. It is
+	// a field so tests can inject one; nil means smokeTestBinary.
+	verify func(context.Context, string) error
 }
 
 var defaultRegistry = &registry{
@@ -400,8 +479,14 @@ func (r *registry) extractMinaBinary(ctx context.Context, tag, outputFile string
 		log.Debugf("Processing layer %d/%d: %s", i+1, len(manifest.Layers), layer.Digest)
 		found, deleted, err := r.processLayer(ctx, token, layer.Digest, tempDir, i+1, outputFile, log)
 		if err != nil {
-			log.Warnf("Failed to process layer %d: %v", i+1, err)
-			continue
+			// Not `continue`. Falling through to a lower layer returns a copy
+			// the image has already replaced -- a probe with the top blob
+			// tampered and "STALE-3.3" beneath it got STALE-3.3 back. In the
+			// real mina-daemon image the layer below mina is 9.3 GB, so a
+			// transient error also started a 9.3 GB download into the pod's
+			// /tmp. A successful walk stops at the first match, so returning
+			// here costs nothing.
+			return fmt.Errorf("layer %d/%d (%s): %w", i+1, len(manifest.Layers), layer.Digest, err)
 		}
 		if deleted {
 			// A whiteout entry records that the file was removed in this

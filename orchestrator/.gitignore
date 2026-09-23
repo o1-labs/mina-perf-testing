@@ -31,3 +31,6 @@ keys/
 keys/
 fund_keys/
 fund-keys/
+
+# Mina binaries extracted from the deployed daemon image (several hundred MB).
+mina-executable/

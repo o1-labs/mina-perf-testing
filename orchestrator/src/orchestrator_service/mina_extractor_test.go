@@ -26,14 +26,14 @@ func TestProcessReleaseString(t *testing.T) {
 			want:    "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
 		},
 		{
-			name:    "already jammy",
+			name:    "already the runtime codename",
 			release: "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
 			want:    "3.3.0-alpha1-compatible-90ff48c-jammy-devnet",
 		},
 		{
 			// The tag Dockerfile-service pinned. It contains no codename, so
 			// it must come back untouched; the old code turned the "state32"
-			// segment into "bullseye".
+			// segment into the codename.
 			name:    "no codename anywhere is left alone",
 			release: "3.2.0-alpha1-app-state32-05da85d",
 			want:    "3.2.0-alpha1-app-state32-05da85d",
@@ -57,8 +57,8 @@ func TestProcessReleaseString(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := processReleaseString(tc.release); got != tc.want {
-				t.Fatalf("processReleaseString(%q) = %q, want %q", tc.release, got, tc.want)
+			if got := processReleaseString(tc.release, "jammy"); got != tc.want {
+				t.Fatalf("processReleaseString(%q, \"jammy\") = %q, want %q", tc.release, got, tc.want)
 			}
 		})
 	}
