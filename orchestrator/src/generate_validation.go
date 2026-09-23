@@ -41,12 +41,22 @@ func ValidationSteps(p *GenParams) []ValidationStep {
 		simpleRangeCheck(p.MinStopRatio, "min stop ratio"),
 		simpleRangeCheck(p.MaxStopRatio, "max stop ratio"),
 		simpleRangeCheck(p.StopCleanRatio, "stop-clean ratio"),
-		simpleRangeCheck(p.MixMaxCostTpsRatio, "max-cost-mixed ratio"),
+		simpleRangeCheck(p.MaxCostMixedTpsRatio, "max-cost-mixed ratio"),
 		simpleRangeCheck(p.RotationRatio, "rotation ratio"),
 		{
 			ErrorMsg: "both max-cost-mixed and max-cost specified",
 			Check: func(p *GenParams) bool {
-				return p.MaxCost && p.MixMaxCostTpsRatio > 1e-3
+				return p.MaxCost && p.MaxCostMixedTpsRatio > 1e-3
+			},
+			ExitCode: 2,
+		},
+		{
+			// Without this, rounds = 0 passes validation and POST /run starts
+			// an "experiment" that is only the funding preamble, completes
+			// immediately and fires the success webhook.
+			ErrorMsg: "wrong rounds: should be a positive number",
+			Check: func(p *GenParams) bool {
+				return p.Rounds <= 0
 			},
 			ExitCode: 2,
 		},
