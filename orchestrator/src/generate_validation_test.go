@@ -48,11 +48,17 @@ func TestValidationRejectsNaNRatios(t *testing.T) {
 func TestValidationRejectsInvertedStopRatios(t *testing.T) {
 	p := DefaultGenParams()
 	p.ExperimentName = "inverted-probe"
+	// DefaultGenParams has no privkeys, so ValidateAndCollectErrors always
+	// returns at least "Specify funding private key files after all flags".
+	// Asserting only len(errs) != 0 therefore passed no matter what the
+	// stop-ratio rule did -- the test could not fail. Give it a clean baseline
+	// and name the error we are actually asserting on.
+	p.Privkeys = []string{"k"}
 	p.MinStopRatio = 1.0
 	p.MaxStopRatio = 0.0
 
 	errs := ValidateAndCollectErrors(&p)
-	if len(errs) == 0 {
-		t.Fatal("an inverted stop-ratio pair was accepted")
+	if !strings.Contains(strings.Join(errs, "; "), "must not exceed max stop ratio") {
+		t.Fatalf("inverted stop-ratio pair not rejected: %v", errs)
 	}
 }
