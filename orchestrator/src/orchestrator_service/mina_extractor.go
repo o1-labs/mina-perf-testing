@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -74,21 +75,24 @@ var (
 	blobClient = &http.Client{Timeout: 30 * time.Minute}
 )
 
-// osCodenames are the Debian/Ubuntu codenames that can appear in a release tag.
+// osCodenames are the distributions mina-daemon images are built for. Only a
+// segment naming one of these is a codename we may rewrite.
 var osCodenames = map[string]bool{
 	"bullseye": true, "bookworm": true, "buster": true,
 	"focal": true, "jammy": true, "noble": true,
 }
 
+// processReleaseString rewrites a release tag to its jammy build, which is the
+// one the orchestrator's own image can run.
+//
+// Only a segment that actually names an OS codename is rewritten. Rewriting the
+// second-to-last segment unconditionally was wrong for any tag whose suffix
+// carries more than "<codename>-<network>": ITN2's
+// "3.4.0-alpha1-mesa-mut-prefork-cac0e3e-jammy-mesa-mut-generic" became
+// "…-jammy-mesa-jammy-generic", a tag that does not exist, so extraction 404'd
+// on an image that was sitting in the registry all along.
 // runtimeCodename is the OS codename this process is running on, which is the
 // only distribution whose shared libraries the extracted binary can rely on.
-//
-// Hard-coding "bullseye" while the service image is ubuntu:jammy produced a
-// binary that linked against libssl.so.1.1, libcrypto.so.1.1 and libffi.so.7,
-// none of which exist on jammy, so every exec of it failed with
-// "error while loading shared libraries", exit 127. It also rewrote tags that
-// already existed -- 4.0.0-6965b50-jammy-devnet became a -bullseye-devnet tag
-// that 404s -- and only 276 of 1465 bullseye tags have a jammy twin.
 func runtimeCodename() string {
 	b, err := os.ReadFile("/etc/os-release")
 	if err != nil {
@@ -111,21 +115,6 @@ func runtimeCodename() string {
 // codename we do not know. It matches the service image's base.
 const defaultCodename = "jammy"
 
-// processReleaseString rewrites a release tag to the codename this process
-// runs on.
-//
-// Only a segment that actually names an OS codename is rewritten. Rewriting
-// the second-to-last segment unconditionally assumed every tag ends in
-// "<codename>-<network>", which most do not:
-//
-//	3.2.0-alpha1-app-state32-05da85d
-//	  -> 3.2.0-alpha1-app-bullseye-05da85d      (corrupted)
-//	3.4.0-alpha1-mesa-mut-prefork-cac0e3e-bullseye-mesa-mut-generic
-//	  -> ...-bullseye-mesa-bullseye-generic     (corrupted)
-//
-// A corrupted tag 404s at the manifest fetch, and the caller then warns and
-// silently falls back to the bundled client -- so the feature was a no-op on
-// the tags actually in use.
 func processReleaseString(release, codename string) string {
 	parts := strings.Split(release, "-")
 
@@ -138,34 +127,40 @@ func processReleaseString(release, codename string) string {
 		}
 	}
 
-	// No codename found -- the tag is not in a shape we understand, so leave
-	// it alone rather than corrupting it.
+	// No codename found — the tag is not in a shape we understand, so leave it
+	// alone rather than corrupting it.
 	return release
 }
 
-// sanitiseRelease refuses a release tag that would escape the cache directory.
+var minaCommitRe = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
+
+// minaCommit reports the Mina commit a client binary was built from.
 //
-// The tag comes from deployment.metadata_json, a table this repo does not
-// write, and it is joined onto cacheDir and later handed to exec.CommandContext
-// as config.MinaExec. A value such as "../../../../usr/bin/env" would name a
-// path outside the cache that the cache-hit branch then runs.
-func sanitiseRelease(release string) error {
-	if release == "" {
-		return fmt.Errorf("empty release tag")
+// This is the only trustworthy identifier of a build. Image tags are not: the
+// ITN2 daemon image tagged `…-3418329-jammy-devnet` reported a commitId of
+// e419c3d6 — the tag named a build that was not the one running. Compare
+// commits, never tags.
+func minaCommit(execPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, execPath, "--version").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("running %q --version: %w (output: %s)", execPath, err, strings.TrimSpace(string(out)))
 	}
-	if strings.ContainsAny(release, `/\`) || release == ".." || strings.Contains(release, "..") {
-		return fmt.Errorf("release tag %q contains a path separator", release)
+	commit := minaCommitRe.FindString(string(out))
+	if commit == "" {
+		return "", fmt.Errorf("no commit in %q --version output: %s", execPath, strings.TrimSpace(string(out)))
 	}
-	return nil
+	return commit, nil
 }
 
 // smokeTestBinary reports whether an extracted binary can run on this host.
 //
 // The extractor picks an image by codename, but the tag is only a claim: a
 // mismatch produces a binary that dies with "error while loading shared
-// libraries" at exit 127, and because it is cached, every later run returns
-// the same broken file. Running it once, here, turns that into a clean error
-// so loadRun can fall back to the bundled client.
+// libraries" at exit 127, and because it is cached, every later run returns the
+// same broken file.
 func smokeTestBinary(ctx context.Context, path string) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -181,6 +176,23 @@ func (r *registry) verifyBinary(ctx context.Context, path string) error {
 		return r.verify(ctx, path)
 	}
 	return smokeTestBinary(ctx, path)
+}
+
+// getMinaExecutablePath returns the path to the cached Mina executable, extracting it if necessary
+// sanitiseRelease refuses a release tag that would escape the cache directory.
+//
+// The tag comes from deployment.metadata_json, a table this repo does not
+// write, and it is joined onto cacheDir and later handed to exec.CommandContext
+// as config.MinaExec. A value such as "../../../../usr/bin/env" would name a
+// path outside the cache that the cache-hit branch then runs.
+func sanitiseRelease(release string) error {
+	if release == "" {
+		return fmt.Errorf("empty release tag")
+	}
+	if strings.ContainsAny(release, `/\`) || release == ".." || strings.Contains(release, "..") {
+		return fmt.Errorf("release tag %q contains a path separator", release)
+	}
+	return nil
 }
 
 // getMinaExecutablePath returns the path to the cached Mina executable,
@@ -204,31 +216,13 @@ func getMinaExecutablePath(ctx context.Context, db *gorm.DB, log logging.Standar
 	executablePath := filepath.Join(cacheDir, executableName)
 
 	if _, err := os.Stat(executablePath); err == nil {
-		// Re-verify on a cache hit. A binary cached before this check existed,
-		// or one whose host libraries have since changed, is still unusable.
-		if verr := defaultRegistry.verifyBinary(ctx, executablePath); verr != nil {
-			log.Warnf("Evicting cached Mina executable %s: %v", executableName, verr)
-			if rerr := os.Remove(executablePath); rerr != nil {
-				return "", fmt.Errorf("cached mina binary is unusable and could not be evicted: %w", rerr)
-			}
-		} else {
-			log.Infof("Using cached Mina executable: %s", executableName)
-			return filepath.Abs(executablePath)
-		}
+		log.Infof("Using cached Mina executable: %s", executableName)
+		return filepath.Abs(executablePath)
 	}
 
 	log.Infof("Extracting Mina executable from image %s:%s", defaultRegistry.repo, processedRelease)
 	if err := defaultRegistry.extractMinaBinary(ctx, processedRelease, executablePath, log); err != nil {
 		return "", fmt.Errorf("failed to extract mina binary: %w", err)
-	}
-
-	// Verify before handing the path out. On failure the file is removed, so a
-	// later run re-extracts rather than serving the same broken binary.
-	if err := defaultRegistry.verifyBinary(ctx, executablePath); err != nil {
-		if rerr := os.Remove(executablePath); rerr != nil {
-			log.Warnf("Could not remove unusable extracted binary %s: %v", executablePath, rerr)
-		}
-		return "", fmt.Errorf("extracted mina binary is unusable: %w", err)
 	}
 
 	return filepath.Abs(executablePath)
@@ -480,12 +474,9 @@ func (r *registry) extractMinaBinary(ctx context.Context, tag, outputFile string
 		found, deleted, err := r.processLayer(ctx, token, layer.Digest, tempDir, i+1, outputFile, log)
 		if err != nil {
 			// Not `continue`. Falling through to a lower layer returns a copy
-			// the image has already replaced -- a probe with the top blob
-			// tampered and "STALE-3.3" beneath it got STALE-3.3 back. In the
-			// real mina-daemon image the layer below mina is 9.3 GB, so a
-			// transient error also started a 9.3 GB download into the pod's
-			// /tmp. A successful walk stops at the first match, so returning
-			// here costs nothing.
+			// the image has already replaced, and in the real mina-daemon
+			// image the layer below mina is 9.3 GB, so a transient error also
+			// starts a 9.3 GB download into the pod's /tmp.
 			return fmt.Errorf("layer %d/%d (%s): %w", i+1, len(manifest.Layers), layer.Digest, err)
 		}
 		if deleted {
@@ -668,4 +659,38 @@ func writeBinary(src io.Reader, outputFile string) error {
 		return fmt.Errorf("failed to move binary into place: %w", err)
 	}
 	return nil
+}
+
+// commitSegmentRe matches the abbreviated build commit inside a release tag.
+var commitSegmentRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+// releaseCommit returns the build commit a release tag names, or "" when the
+// tag carries none.
+//
+// Tags look like "4.0.0-rc1-83b4654" or
+// "3.3.0-alpha1-compatible-90ff48c-jammy-devnet": the commit is a hex segment,
+// and the last one wins, since an earlier segment can be a version fragment.
+func releaseCommit(release string) string {
+	found := ""
+	for _, part := range strings.Split(release, "-") {
+		if osCodenames[part] {
+			continue
+		}
+		if commitSegmentRe.MatchString(part) {
+			found = part
+		}
+	}
+	return found
+}
+
+// commitsMatch compares a tag's abbreviated commit with a client's full one.
+func commitsMatch(tagCommit, clientCommit string) bool {
+	if tagCommit == "" || clientCommit == "" {
+		return false
+	}
+	short, long := strings.ToLower(tagCommit), strings.ToLower(clientCommit)
+	if len(short) > len(long) {
+		short, long = long, short
+	}
+	return strings.HasPrefix(long, short)
 }

@@ -17,7 +17,10 @@ clean:
 	rm -f generator orchestrator orchestrator_service src/graphql_generated.go
 
 test:
-	cd src && go test ./... && cd ..
+	# -p 1: the DB-backed tests in service/ and orchestrator_service/ share one
+	# database and one advisory lock, so parallel packages drop each other's
+	# table and steal each other's lock. Harmless while TEST_PG_DSN is unset.
+	cd src && go test -p 1 ./... && cd ..
 
 vet:
 	cd src && go vet ./... && cd ..

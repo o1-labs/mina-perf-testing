@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -81,12 +80,16 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 		h.Store.UpdateCurrentStep(name, step)
 	}
 
+	// Add both claims the experiment slot and persists the experiment, and it
+	// releases the claim if the write fails. A held slot is the caller's
+	// problem (409); a failed write is ours (500). These were previously two
+	// steps, and a write that failed between them left the slot held forever.
 	if err := h.Store.Add(job, cancel); err != nil {
-		return http.StatusConflict, []string{fmt.Sprintf("failed to add experiment: %v", err)}, nil
-	}
-
-	if err := h.Store.WriteExperimentToDB(*job); err != nil {
-		return http.StatusInternalServerError, []string{fmt.Sprintf("failed to write experiment to database: %v", err)}, nil
+		cancel()
+		if errors.Is(err, service.ErrExperimentRunning) {
+			return http.StatusConflict, []string{err.Error()}, nil
+		}
+		return http.StatusInternalServerError, []string{err.Error()}, nil
 	}
 
 	decoder := json.NewDecoder(strings.NewReader(experimentScript))
@@ -110,6 +113,16 @@ func (h *CreateExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		writeResponse(w, status, APIResponse{
 			Errors: []string{err.Error()},
 			Result: "error",
+		})
+		return
+	}
+	// experiment_name is dereferenced from here on. Omitting it used to panic
+	// on the nil pointer, which killed the connection and reached the caller as
+	// a 502 rather than as the bad request it is.
+	if experimentSetup.ExperimentName == nil || *experimentSetup.ExperimentName == "" {
+		writeResponse(w, http.StatusBadRequest, APIResponse{
+			Errors: []string{"experiment_name is required"},
+			Result: "invalid",
 		})
 		return
 	}
