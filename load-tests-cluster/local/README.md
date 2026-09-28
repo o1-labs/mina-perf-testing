@@ -57,7 +57,11 @@ read it too.
 | `plain-1` | node without a role, which receives load | node without a role, which receives load |
 | `plain-2` | node without a role, which receives load | not started |
 
-The minimal topology is for small machines and CI. On the machine it was
+The minimal topology is for small machines and CI: the workflow
+`.github/workflows/local-env.yml` runs `make up smoke TOPOLOGY=minimal` on
+every pull request that changes `orchestrator/`, `uptime-backend/` or
+`load-tests-cluster/`, and uploads all container logs as the artifact
+`local-env-logs`. On the machine it was
 tested on, `make up` to `PASS` took about 10 minutes, and the two daemons used
 about 2.6 GB each during the experiment. `bp-1`, `bp-2` and `plain-2` are in
 the compose profile `full`; `make up` removes all nodes first, so a change of
