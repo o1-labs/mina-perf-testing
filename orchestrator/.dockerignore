@@ -22,3 +22,6 @@ result/
 README.md
 *.test
 *.out
+
+# Extracted mina binaries; COPY . . would ship them into the builder layer.
+**/mina-executable/

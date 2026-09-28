@@ -68,52 +68,23 @@ func schedulePaymentsDo(config Config, params PaymentSubParams, nodeAddress Node
 }
 
 func SchedulePayments(config Config, params PaymentParams, output func(ScheduledPaymentsReceipt)) error {
-	tps, nodes := selectNodes(params.Tps, params.MinTps, params.Nodes)
-	if len(nodes) == 0 {
-		return fmt.Errorf("no nodes selected for payment execution (tps=%.6f, minTps=%.6f, available nodes=%d)",
-			params.Tps, params.MinTps, len(params.Nodes))
-	}
-	feePayersPerNode := len(params.FeePayers) / len(nodes)
-	successfulNodes := make([]NodeAddress, 0, len(nodes))
-	remTps := params.Tps
-	remFeePayers := params.FeePayers
-	var err error
-	for nodeIx, nodeAddress := range nodes {
-		feePayers := remFeePayers[:feePayersPerNode]
-		var handle string
-		handle, err = schedulePaymentsDo(config, params.PaymentSubParams, nodeAddress, len(successfulNodes), tps, feePayers)
-		if err != nil {
-			config.Log.Warnf("error scheduling payments for %s: %v", nodeAddress, err)
-			n := len(nodes) - nodeIx - 1
-			if n > 0 {
-				tps = remTps / float64(n)
-				feePayersPerNode = len(remFeePayers) / n
-			}
-			continue
-		}
-		successfulNodes = append(successfulNodes, nodeAddress)
-		remFeePayers = remFeePayers[feePayersPerNode:]
-		remTps -= tps
-		output(ScheduledPaymentsReceipt{
-			Address: nodeAddress,
-			Handle:  handle,
-		})
-	}
-	if err != nil {
-		// last schedule payment request didn't work well
-		for _, nodeAddress := range successfulNodes {
-			handle, err2 := schedulePaymentsDo(config, params.PaymentSubParams, nodeAddress, len(successfulNodes), tps, remFeePayers)
-			if err2 != nil {
-				config.Log.Warnf("error scheduling second batch of payments for %s: %v", nodeAddress, err2)
-				continue
-			}
+	_, err := scheduleTransactionBatches(
+		config,
+		"payments",
+		params.Tps,
+		params.MinTps,
+		params.Nodes,
+		params.FeePayers,
+		func(nodeAddress NodeAddress, batchIx int, tps float64, feePayers []itn_json_types.MinaPrivateKey) (string, error) {
+			return schedulePaymentsDo(config, params.PaymentSubParams, nodeAddress, batchIx, tps, feePayers)
+		},
+		func(nodeAddress NodeAddress, handle string) {
 			output(ScheduledPaymentsReceipt{
 				Address: nodeAddress,
 				Handle:  handle,
 			})
-			return nil
-		}
-	}
+		},
+	)
 	return err
 }
 
