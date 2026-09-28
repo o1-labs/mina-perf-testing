@@ -43,6 +43,8 @@ Endpoints (all on `127.0.0.1`; set the `LOCAL_*_PORT` variables to change them):
 | Uptime backend (`/v1/online`) | 8080 |
 | Postgres (user `postgres`, password `local`, database `logs`) | 55433 |
 | Seed node GraphQL | 3085 |
+| Rosetta (`ARCHIVE=1`) | 3087 |
+| Archive Postgres (`ARCHIVE=1`; user `postgres`, password `local`, database `archive`) | 55434 |
 
 ## The network
 
@@ -73,6 +75,49 @@ interface the orchestrator uses on a real cluster: it discovers nodes through
 the uptime backend's `/v1/online` and controls them over signed ITN GraphQL.
 It funds its keys from the `whale` account with `mina advanced
 itn-create-accounts` through the seed's client port.
+
+## Archive node and Rosetta
+
+`ARCHIVE=1` adds three containers to either topology (compose profile
+`archive`). Give it to every `make` command, as with `TOPOLOGY`:
+
+```sh
+make up smoke ARCHIVE=1
+make up smoke TOPOLOGY=minimal ARCHIVE=1
+```
+
+| Container | Content |
+|:--|:--|
+| `archive-db` | Postgres for the archive only, separate from the perf-testing database |
+| `archive` | `mina-archive run` (`MINA_ARCHIVE_IMAGE`, default `minaprotocol/mina-archive:4.0.0-6965b50-jammy-devnet`) with the nodes' runtime config. It applies `/etc/mina/archive/create_schema.sql` from its image to an empty database. |
+| `rosetta` | `mina-rosetta` (`MINA_ROSETTA_IMAGE`, default `minaprotocol/mina-rosetta:4.0.0-6965b50-jammy-devnet`) on the archive database and the seed's GraphQL |
+
+The seed sends every block it accepts to the archive (`--archive-address`),
+and it starts only after the archive listens, so the archive has the chain
+from block 1. The archive database has no named volume: `make up` removes it
+with the nodes, because every `up` starts a new chain.
+
+With `ARCHIVE=1`, `make smoke` also checks, through Rosetta, that the archive
+tip is at most 2 blocks behind the seed, that block 2 has the same state hash
+in the archive and on the seed, and that the archive holds at least as many
+transactions as the experiment put in the best chain. `make status` shows the
+archive tip.
+
+Rosetta reports the network as `{"blockchain": "mina", "network": "testnet"}`
+(`POST /network/list`). Its `search/transactions` counts user commands only;
+zkApp commands are in the archive's `zkapp_commands` table.
+
+There is no view of this data yet (for example `mina-frontend`); use Rosetta
+or the archive database directly.
+
+Details that the compose file handles:
+
+- Rosetta exits at start without `MINA_ROSETTA_MAX_DB_POOL_SIZE` (set to 32).
+- Rosetta's flags take their value as a separate argument: `--port 3087`,
+  not `--port=3087`.
+- The archive healthcheck reads `/proc/net/tcp` for the listening port. A TCP
+  probe works too, but the archive logs each connection without an RPC
+  handshake as an error.
 
 ## Constraints
 
@@ -115,5 +160,6 @@ itn-create-accounts` through the seed's client port.
 | `scripts/local-env.sh` | key generation, runtime config, orchestrator config |
 | `scripts/node-entrypoint.sh` | daemon flags for each role |
 | `scripts/smoke.sh` | `status` and `run` for `make status` and `make smoke` |
+| `scripts/archive-entrypoint.sh` | archive schema on an empty database, then `mina-archive run` |
 | `initdb/000-init.sh` | applies `../init-sql`, then records the local deployment |
 | `generated/` | keys and configs (git-ignored; `make clean` deletes it) |

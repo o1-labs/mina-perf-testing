@@ -7,7 +7,8 @@
 #   local-env.sh keys     create the keys once; a second run keeps them
 #   local-env.sh genesis  write a runtime config and orchestrator config with
 #                         a genesis timestamp GENESIS_DELAY_SEC from now, for
-#                         TOPOLOGY full (5 nodes) or minimal (2 nodes)
+#                         TOPOLOGY full (5 nodes) or minimal (2 nodes), and
+#                         with ARCHIVE=1 an archive node the seed sends to
 set -euo pipefail
 
 OUT=${OUT:-/out}
@@ -16,6 +17,7 @@ PASS=${MINA_PRIVKEY_PASS:?MINA_PRIVKEY_PASS must be set}
 SLOT_MS=${SLOT_MS:-20000}
 GENESIS_DELAY_SEC=${GENESIS_DELAY_SEC:-180}
 TOPOLOGY=${TOPOLOGY:-full}
+ARCHIVE=${ARCHIVE:-0}
 
 # Every daemon also sends uptime submissions signed with its own key; the
 # block producers use their block producer key for both. Keys are made for
@@ -128,8 +130,9 @@ GENESIS_TIMESTAMP=$ts
 LOCAL_TOPOLOGY=$TOPOLOGY
 LOCAL_NODES="$nodes"
 SEED_BLOCK_PRODUCER=$seed_bp
+ARCHIVE_ADDRESS=$([ "$ARCHIVE" = 1 ] && echo archive:3086)
 EOF
-  echo "genesis at $ts, topology $TOPOLOGY: $nodes"
+  echo "genesis at $ts, topology $TOPOLOGY: $nodes, archive: $ARCHIVE"
 }
 
 case "${1:-}" in
