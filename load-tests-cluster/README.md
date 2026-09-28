@@ -2,6 +2,8 @@
 
 This directory contains the Docker Compose infrastructure for running performance testing and monitoring of the Mina network. It provides a complete environment with log fetching, data persistence, dashboard visualization, and experiment orchestration.
 
+To run the same stack together with a private 5-node Mina network on one machine, with no cluster, see [`local/`](local/README.md).
+
 ## Local Setup Checklist
 
 - Copy `.env.example` to `.env` and adjust values for your environment before booting the stack.
