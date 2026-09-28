@@ -13,7 +13,6 @@ import (
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/lib/pq"
-	"gorm.io/datatypes"
 )
 
 type ExperimentStatus string
@@ -36,10 +35,16 @@ type ExperimentState struct {
 	Comment         *string          `json:"comment,omitempty"`
 	CurrentStepNo   int              `json:"step"`
 	CurrentStepName string           `json:"step_name"`
-	SetupJSON       datatypes.JSON   `json:"setup_json"`
+	Setup           lib.GenParams    `gorm:"column:setup_json;type:jsonb" json:"setup_json"`
 	Warnings        pq.StringArray   `gorm:"type:text[]" json:"warnings,omitempty"`
 	Errors          pq.StringArray   `gorm:"type:text[]" json:"errors,omitempty"`
 	Logs            pq.StringArray   `gorm:"type:text[]" json:"logs,omitempty"`
+	// WebhookURL is never serialised to API clients: for Slack, Discord and
+	// Teams the URL *is* the credential, and GET /api/v0/experiment/status
+	// is unauthenticated. Persistence is driven by the gorm tag and by the
+	// explicit column map in updateExperimentInDB, so the DB column is
+	// unaffected by `json:"-"`.
+	WebhookURL string `gorm:"column:webhook_url" json:"-"`
 }
 
 func (ExperimentState) TableName() string {
@@ -53,17 +58,30 @@ type Store struct {
 	cancel     context.CancelFunc
 }
 
-func NewStore(db *gorm.DB) *Store {
+// NewStore opens the store and creates experiment_state if it is missing.
+//
+// The error is returned rather than logged because this AutoMigrate is the only
+// thing that creates the table -- load-tests-cluster/init-sql has no DDL for it.
+// If it fails (for example, a role without CREATE), the service would bind and
+// look healthy, and the first POST /run would fail with
+// `relation "experiment_state" does not exist` after Store.Add had already
+// taken the in-process slot. Failing at boot is the honest outcome.
+func NewStore(db *gorm.DB) (*Store, error) {
+	log.Printf("Starting auto-migration for ExperimentState table...")
+	if err := db.AutoMigrate(&ExperimentState{}); err != nil {
+		return nil, fmt.Errorf("auto-migrating ExperimentState table: %w", err)
+	}
+	log.Printf("Auto-migration completed successfully")
 	return &Store{
 		DB: db,
-	}
+	}, nil
 }
 
-func (a *Store) CheckExperimentIsUnique(name string) bool {
+func (a *Store) NameIsUnique(name string) bool {
 	var count int64
 	err := a.DB.Where("name = ?", name).Model(&ExperimentState{}).Count(&count).Error
 	if err != nil {
-		log.Printf("Error checking experiment uniqueness: %v", err)
+		log.Printf("Error checking experiment uniqueness for name '%s': %v", name, err)
 		return false
 	}
 	return count == 0
@@ -78,18 +96,23 @@ func (a *Store) WriteExperimentToDB(state ExperimentState) error {
 	return nil
 }
 
+// updateExperimentInDB persists the mutable half of the state.
+//
+// setup_json is deliberately absent: it never changes after creation, and
+// WriteExperimentToDB already writes it once. This function is called from
+// AtomicSet, i.e. once per appended log line, so including it re-marshalled the
+// whole GenParams -- Privkeys and RotationKeys among them -- on every log line.
 func (a *Store) updateExperimentInDB(state *ExperimentState) error {
-
 	err := a.DB.Model(&ExperimentState{}).Where("name = ?", state.Name).Updates(map[string]interface{}{
 		"updated_at":        state.UpdatedAt,
 		"ended_at":          state.EndedAt,
 		"status":            state.Status,
-		"setup_json":        state.SetupJSON,
 		"current_step_no":   state.CurrentStepNo,
 		"current_step_name": state.CurrentStepName,
 		"warnings":          state.Warnings,
 		"errors":            state.Errors,
 		"logs":              state.Logs,
+		"webhook_url":       state.WebhookURL,
 	}).Error
 	if err != nil {
 		log.Printf("Error updating experiment in DB: %v", err)
@@ -99,7 +122,7 @@ func (a *Store) updateExperimentInDB(state *ExperimentState) error {
 
 }
 
-func (s *Store) AtomicSet(f func(experiment *ExperimentState)) {
+func (s *Store) AtomicSet(f func(experiment *ExperimentState)) *ExperimentState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.experiment != nil {
@@ -115,6 +138,7 @@ func (s *Store) AtomicSet(f func(experiment *ExperimentState)) {
 			log.Printf("Error updating experiment in DB: %v", err)
 		}
 	}
+	return s.experiment
 }
 
 func (s *Store) AtomicGet() *ExperimentState {
@@ -127,20 +151,40 @@ func (s *Store) AtomicGet() *ExperimentState {
 }
 
 // FinishWithError sets the experiment status to "error" and appends the error message
-func (s *Store) FinishWithError(err *lib.OrchestratorError) {
-	s.AtomicSet(func(experiment *ExperimentState) {
+func (s *Store) FinishWithError(err *lib.OrchestratorError) *ExperimentState {
+	return s.AtomicSet(func(experiment *ExperimentState) {
 		experiment.Status = "error"
 		experiment.Errors = append(experiment.Errors, err.Message)
-		experiment.EndedAt = &time.Time{}
+		experiment.EndedAt = endedNow()
 	})
 }
 
 // FinishWithSuccess sets the experiment status to "success" and marks it as completed
-func (s *Store) FinishWithSuccess() {
-	s.AtomicSet(func(experiment *ExperimentState) {
+func (s *Store) FinishWithSuccess() *ExperimentState {
+	return s.AtomicSet(func(experiment *ExperimentState) {
 		experiment.Status = "success"
-		experiment.EndedAt = &time.Time{}
+		experiment.EndedAt = endedNow()
 	})
+}
+
+// FinishWithCancel marks an experiment the operator asked to stop as cancelled.
+//
+// A cancellation is not a failure: it must not add to Errors and must not fire
+// the error webhook. Without this the context cancellation surfaces as an
+// ordinary error from RunExperiment and the experiment is reported as "error".
+func (s *Store) FinishWithCancel() *ExperimentState {
+	return s.AtomicSet(func(experiment *ExperimentState) {
+		experiment.Status = Cancelled
+		experiment.EndedAt = endedNow()
+	})
+}
+
+// endedNow returns the completion timestamp. It exists because the three
+// Finish* paths previously stored &time.Time{}, so every finished experiment
+// reported ended_at = 0001-01-01T00:00:00Z.
+func endedNow() *time.Time {
+	now := time.Now()
+	return &now
 }
 
 // Add sets the single job if none is running
@@ -214,13 +258,12 @@ func (s *Store) AppendErrorF(format string, args ...interface{}) error {
 func (s *Store) AppendLogF(format string, args ...interface{}) error {
 	message := fmt.Sprintf(format, args...)
 	s.AtomicSet(func(experiment *ExperimentState) {
-		if strings.HasPrefix(format, "Performing steps") {
-			experiment.CurrentStepName = args[0].(string)
-			experiment.CurrentStepNo = args[2].(int)
-		} else if strings.HasPrefix(format, "Performing step") {
-			experiment.CurrentStepName = args[0].(string)
-			experiment.CurrentStepNo = args[1].(int)
-		}
+		// The current step is reported through Config.ReportStep, wired to
+		// UpdateCurrentStep. This function used to prefix-match the log format
+		// string and type-assert positional args out of it, which read the
+		// batch *end* for "Performing steps %s (%d-%d)" and the *start* for
+		// "Performing step %s (%d)" -- so the reported step jumped forward for
+		// batched steps and not for single ones.
 		experiment.Logs = append(experiment.Logs, message)
 		experiment.UpdatedAt = time.Now()
 	})

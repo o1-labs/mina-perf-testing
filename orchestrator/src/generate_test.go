@@ -26,7 +26,7 @@ func someParams() GenParams {
 		PaymentReceiver:        "B62qpPita1s7Dbnr7MVb3UK8fdssZixL1a4536aeMYxbTJEtRGGyS8U",
 		PrivkeysPerFundCmd:     2,
 		GenerateFundKeys:       20,
-		MixMaxCostTpsRatio:     0.7,
+		MaxCostMixedTpsRatio:   0.7,
 		LargePauseEveryNRounds: 8,
 		LargePauseMin:          240,
 		MinBalanceChange:       1e3,

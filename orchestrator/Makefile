@@ -17,6 +17,9 @@ clean:
 	rm -f generator orchestrator orchestrator_service src/graphql_generated.go
 
 test:
-	cd src && go test && cd ..
+	cd src && go test ./... && cd ..
 
-.PHONY: clean tidy test
+vet:
+	cd src && go vet ./... && cd ..
+
+.PHONY: clean tidy test vet

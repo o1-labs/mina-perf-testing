@@ -4,13 +4,20 @@ import (
 	"fmt"
 	"itn_json_types"
 	lib "itn_orchestrator"
+	"os"
 	"strings"
 )
 
 type GeneratorInputData struct {
-	BaseTps                *float64                      `json:"base_tps,omitempty"`
-	StressTps              *float64                      `json:"stress_tps,omitempty"`
-	MinTps                 *float64                      `json:"min_tps,omitempty"`
+	BaseTps              *float64 `json:"base_tps,omitempty"`
+	StressTps            *float64 `json:"stress_tps,omitempty"`
+	MinTps               *float64 `json:"min_tps,omitempty"`
+	MaxCostMixedTpsRatio *float64 `json:"max_cost_mixed_tps_ratio,omitempty"`
+	// MixMaxCostTpsRatio is the former name of MaxCostMixedTpsRatio. It is
+	// accepted so that callers written against the old API keep working, and
+	// is used only when max_cost_mixed_tps_ratio is absent.
+	//
+	// Deprecated: send max_cost_mixed_tps_ratio instead.
 	MixMaxCostTpsRatio     *float64                      `json:"mix_max_cost_tps_ratio,omitempty"`
 	MinStopRatio           *float64                      `json:"min_stop_ratio,omitempty"`
 	MaxStopRatio           *float64                      `json:"max_stop_ratio,omitempty"`
@@ -28,7 +35,6 @@ type GeneratorInputData struct {
 	StopsPerRound          *int                          `json:"stops_per_round,omitempty"`
 	Gap                    *int                          `json:"gap,omitempty"`
 	ZkappSoftLimit         *int                          `json:"zkapp_soft_limit,omitempty"`
-	Mode                   *string                       `json:"mode,omitempty"`
 	FundKeyPrefix          *string                       `json:"fund_key_prefix,omitempty"`
 	PasswordEnv            *string                       `json:"password_env,omitempty"`
 	PaymentReceiver        *itn_json_types.MinaPublicKey `json:"payment_receiver,omitempty"`
@@ -44,6 +50,7 @@ type GeneratorInputData struct {
 	MaxBalanceChange       *uint64                       `json:"max_balance_change,omitempty"`
 	MinBalanceChange       *uint64                       `json:"min_balance_change,omitempty"`
 	PaymentAmount          *uint64                       `json:"payment_amount,omitempty"`
+	WebhookURL             *string                       `json:"webhook_url,omitempty"`
 	Privkeys               []string                      `json:"priv_keys,omitempty"`
 	Fees                   struct {
 		Deployment *uint64 `json:"deployment,omitempty"`
@@ -55,7 +62,29 @@ type GeneratorInputData struct {
 	} `json:"fees,omitempty"`
 }
 
-const mixMaxCostTpsRatioHelp = "when provided, specifies ratio of tps (proportional to total tps) for max cost transactions to be used every other round, zkapps ratio for these rounds is set to 100%"
+// Redacted returns a copy of the setup that is safe to echo into the
+// generated script's header comment.
+//
+// That comment goes to StoreLogging, i.e. into ExperimentState.Logs, and
+// GET /api/v0/experiment/status serves Logs without authentication. For
+// Slack, Discord and Teams the webhook URL is the credential itself, so it
+// must not travel that path; the private-key paths are dropped for the same
+// reason, at a lower severity.
+// RedactedForLog is the hook lib.EncodeWithContext looks for before it
+// marshals a setup into the generated script's header comment.
+func (inputData *GeneratorInputData) RedactedForLog() any {
+	return inputData.Redacted()
+}
+
+func (inputData *GeneratorInputData) Redacted() *GeneratorInputData {
+	if inputData == nil {
+		return nil
+	}
+	redacted := *inputData
+	redacted.WebhookURL = nil
+	redacted.Privkeys = nil
+	return &redacted
+}
 
 func (inputData *GeneratorInputData) ApplyWithDefaults(p *lib.GenParams) {
 
@@ -67,7 +96,14 @@ func (inputData *GeneratorInputData) ApplyWithDefaults(p *lib.GenParams) {
 	lib.SetOrDefault(inputData.BaseTps, &p.BaseTps, defaults.BaseTps)
 	lib.SetOrDefault(inputData.StressTps, &p.StressTps, defaults.StressTps)
 	lib.SetOrDefault(inputData.MinTps, &p.MinTps, defaults.MinTps)
-	lib.SetOrDefault(inputData.MixMaxCostTpsRatio, &p.MixMaxCostTpsRatio, defaults.MixMaxCostTpsRatio)
+	// The new key wins; the deprecated one is honoured only in its absence.
+	maxCostMixed := inputData.MaxCostMixedTpsRatio
+	if maxCostMixed == nil && inputData.MixMaxCostTpsRatio != nil {
+		maxCostMixed = inputData.MixMaxCostTpsRatio
+		fmt.Fprintln(os.Stderr,
+			"warning: \"mix_max_cost_tps_ratio\" is deprecated, use \"max_cost_mixed_tps_ratio\"")
+	}
+	lib.SetOrDefault(maxCostMixed, &p.MaxCostMixedTpsRatio, defaults.MaxCostMixedTpsRatio)
 	lib.SetOrDefault(inputData.MinStopRatio, &p.MinStopRatio, defaults.MinStopRatio)
 	lib.SetOrDefault(inputData.MaxStopRatio, &p.MaxStopRatio, defaults.MaxStopRatio)
 	lib.SetOrDefault(inputData.SenderRatio, &p.SenderRatio, defaults.SenderRatio)
