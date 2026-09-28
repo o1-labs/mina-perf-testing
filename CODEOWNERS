@@ -11,7 +11,7 @@
 # otherwise GitHub silently ignores them and requests no review.
 
 # Default owners for everything in the repository.
-* @deepthiskumar @georgeee @glyh @dkijania @SanabriaRusso
+* @dkijania @SanabriaRusso
 
 # The ownership rules themselves.
-/CODEOWNERS @deepthiskumar @georgeee @glyh @dkijania @SanabriaRusso
+/CODEOWNERS @dkijania @SanabriaRusso
