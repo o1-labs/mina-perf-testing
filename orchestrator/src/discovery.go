@@ -182,7 +182,10 @@ func DiscoverParticipants(config Config, params DiscoveryParams, output func(Nod
 	for retryPause := 10; retryPause <= 40; retryPause = retryPause * 2 {
 		select {
 		case <-config.Ctx.Done():
-			return
+			// A naked return here reported success: on the first iteration
+			// err is still nil, so a cancel during the first attempt looked
+			// like discovery that had found zero participants.
+			return config.Ctx.Err()
 		default:
 		}
 
@@ -192,7 +195,9 @@ func DiscoverParticipants(config Config, params DiscoveryParams, output func(Nod
 		}
 		if retryPause <= 20 {
 			config.Log.Warnf("Failed to discover participants, retrying in %d minutes: %s", retryPause, err)
-			time.Sleep(time.Duration(retryPause) * time.Minute)
+			if err := sleepOrCancel(config.Ctx, time.Duration(retryPause)*time.Minute); err != nil {
+				return err
+			}
 		}
 	}
 	return

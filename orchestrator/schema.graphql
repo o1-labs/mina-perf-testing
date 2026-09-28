@@ -191,6 +191,18 @@ input ZkappCommandsDetails {
   """Generate max cost zkApp command"""
   maxCost: Boolean!
 
+  """
+  When true, the scheduled (non-max-cost) zkApp load initializes a custom,
+  non-default (owned) token and transacts in it instead of the default MINA
+  token. Defaults to false. Has no effect when maxCost is set. Daemons that do
+  not define this field ignore it, so sending it (as false) to an older daemon
+  is harmless: ocaml-graphql-server coerces arguments by folding over the
+  fields the schema declares (graphql_schema.ml, Arg.eval_arglist) and never
+  inspects supplied keys that match no declared field. It runs no GraphQL
+  validation phase for input objects, so spec rule 5.6.2 is not enforced.
+  """
+  nonDefaultToken: Boolean
+
   """The size of queue for recently used accounts"""
   accountQueueSize: Int!
 

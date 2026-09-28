@@ -30,6 +30,7 @@ func main() {
 	flag.BoolVar(&p.StopOnlyBps, "stop-only-bps", defaults.StopOnlyBps, "stop only block producers")
 	flag.BoolVar(&p.UseRestartScript, "use-restart-script", defaults.UseRestartScript, "use restart script instead of stop-daemon command")
 	flag.BoolVar(&p.MaxCost, "max-cost", defaults.MaxCost, "send max-cost zkapp commands")
+	flag.BoolVar(&p.NonDefaultToken, "non-default-token", defaults.NonDefaultToken, "drive the zkapp load in a custom, non-default (owned) token instead of MINA (no effect with -max-cost)")
 	flag.IntVar(&p.RoundDurationMin, "round-duration", defaults.RoundDurationMin, "duration of a round, minutes")
 	flag.IntVar(&p.PauseMin, "pause", defaults.PauseMin, "duration of a pause between rounds, minutes")
 	flag.IntVar(&p.Rounds, "rounds", defaults.Rounds, "number of rounds to run experiment")
