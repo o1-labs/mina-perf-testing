@@ -9,11 +9,13 @@
 #                     without errors and that its transactions reached blocks
 set -euo pipefail
 
-NODES="seed bp-1 bp-2 plain-1 plain-2"
 ORCH=http://orchestrator-service:9090/api/v0/experiment
 ONLINE=http://uptime-backend:8080/v1/online
 # shellcheck disable=SC1091
 . /out/nodes.env
+# The nodes of the current topology (local-env.sh genesis).
+NODES=$LOCAL_NODES
+N_NODES=$(wc -w <<<"$NODES")
 
 gql() { # node query
   curl -sf -m 5 -H 'Content-Type: application/json' \
@@ -54,7 +56,8 @@ wait_for() { # description timeout_sec command...
 cmd_status() {
   echo "genesis: $GENESIS_TIMESTAMP"
   for n in $NODES; do printf '%-8s height %s\n' "$n" "$(height "$n" || true)"; done
-  echo "discovered by uptime backend: $(online_count) of 5"
+  echo "topology: $LOCAL_TOPOLOGY"
+  echo "discovered by uptime backend: $(online_count) of $N_NODES"
   curl -sf -m 5 "$ORCH/status" | jq -c '.result | {name, status, step, step_name, errors}' 2>/dev/null ||
     echo "orchestrator: no experiment yet"
 }
@@ -62,7 +65,7 @@ cmd_status() {
 cmd_run() {
   wait_for "blocks (seed height >= 3)" 900 \
     bash -c "h=\$(bash \"$0\" _height seed); [ -n \"\$h\" ] && [ \"\$h\" -ge 3 ]"
-  wait_for "all 5 nodes in /v1/online" 600 bash -c "[ \"\$(bash \"$0\" _online)\" -ge 5 ]"
+  wait_for "all $N_NODES nodes in /v1/online" 600 bash -c "[ \"\$(bash \"$0\" _online)\" -ge $N_NODES ]"
 
   local name
   name="local-smoke-$(date -u +%Y%m%d%H%M%S)"

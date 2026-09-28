@@ -48,14 +48,19 @@ services:
     depends_on: [uptime-backend]
     ports:
       - "127.0.0.1:${LOCAL_SEED_GRAPHQL_PORT:-3085}:3085"
+  # bp-1, bp-2 and plain-2 run only in the full topology (profile "full",
+  # which the Makefile sets for TOPOLOGY=full). In the minimal topology the
+  # seed also produces blocks, and plain-1 is the second node.
   bp-1:
     <<: *node
+    profiles: [full]
     environment: { <<: *node-env, NODE_NAME: bp-1, NODE_ROLE: bp }
     depends_on: &wave2
       uptime-backend: { condition: service_started }
       seed: { condition: service_healthy }
   bp-2:
     <<: *node
+    profiles: [full]
     environment: { <<: *node-env, NODE_NAME: bp-2, NODE_ROLE: bp }
     depends_on: *wave2
   plain-1:
@@ -63,10 +68,12 @@ services:
     environment: { <<: *node-env, NODE_NAME: plain-1, NODE_ROLE: plain }
     depends_on: &wave3
       uptime-backend: { condition: service_started }
-      bp-1: { condition: service_healthy }
-      bp-2: { condition: service_healthy }
+      seed: { condition: service_healthy }
+      bp-1: { condition: service_healthy, required: false }
+      bp-2: { condition: service_healthy, required: false }
   plain-2:
     <<: *node
+    profiles: [full]
     environment: { <<: *node-env, NODE_NAME: plain-2, NODE_ROLE: plain }
     depends_on: *wave3
 

@@ -6,7 +6,8 @@
 #
 #   local-env.sh keys     create the keys once; a second run keeps them
 #   local-env.sh genesis  write a runtime config and orchestrator config with
-#                         a genesis timestamp GENESIS_DELAY_SEC from now
+#                         a genesis timestamp GENESIS_DELAY_SEC from now, for
+#                         TOPOLOGY full (5 nodes) or minimal (2 nodes)
 set -euo pipefail
 
 OUT=${OUT:-/out}
@@ -14,10 +15,12 @@ KEYS=$OUT/keys
 PASS=${MINA_PRIVKEY_PASS:?MINA_PRIVKEY_PASS must be set}
 SLOT_MS=${SLOT_MS:-20000}
 GENESIS_DELAY_SEC=${GENESIS_DELAY_SEC:-180}
+TOPOLOGY=${TOPOLOGY:-full}
 
 # Every daemon also sends uptime submissions signed with its own key; the
-# block producers use their block producer key for both.
-NODES="seed bp-1 bp-2 plain-1 plain-2"
+# block producers use their block producer key for both. Keys are made for
+# all nodes, so a change of topology needs no new keys.
+ALL_NODES="seed bp-1 bp-2 plain-1 plain-2"
 
 mina_keypair() {
   local name=$1
@@ -41,7 +44,7 @@ itn_keypair() {
 cmd_keys() {
   mkdir -p "$KEYS"
   chmod 700 "$KEYS"
-  for n in $NODES whale; do mina_keypair "$n"; done
+  for n in $ALL_NODES whale; do mina_keypair "$n"; done
   itn_keypair orchestrator_sk
   itn_keypair fetcher_sk
   if [ ! -f "$KEYS/seed-libp2p" ]; then
@@ -58,27 +61,43 @@ pub() { cat "$KEYS/$1.pub"; }
 
 cmd_genesis() {
   [ -f "$KEYS/whale.pub" ] || { echo "run 'local-env.sh keys' first" >&2; exit 1; }
-  local ts
+  local ts nodes seed_bp accounts
   ts=$(date -u -d "+${GENESIS_DELAY_SEC} seconds" +%Y-%m-%dT%H:%M:%SZ)
 
-  # proof.level none: a Full-compiled daemon accepts it at run time, and it
-  # keeps five daemons within a laptop's memory. The ledger gives each block
-  # producer its own stake and delegates the whale to bp-1, so both win slots.
-  jq -n \
-    --arg ts "$ts" --argjson slot "$SLOT_MS" \
-    --arg bp1 "$(pub bp-1)" --arg bp2 "$(pub bp-2)" \
-    --arg whale "$(pub whale)" --arg seed "$(pub seed)" '
-    { genesis: { genesis_state_timestamp: $ts },
-      proof: { level: "none", block_window_duration_ms: $slot },
-      ledger: {
-        name: "perf-local",
-        add_genesis_winner: false,
-        accounts: [
+  # full: bp-1 and bp-2 each have their own stake, and the whale delegates to
+  # bp-1, so both win slots. minimal: the seed is also the only block
+  # producer, and the whale delegates to it.
+  case "$TOPOLOGY" in
+    full)
+      nodes=$ALL_NODES
+      seed_bp=0
+      accounts=$(jq -n --arg bp1 "$(pub bp-1)" --arg bp2 "$(pub bp-2)" \
+        --arg whale "$(pub whale)" --arg seed "$(pub seed)" '[
           { pk: $bp1,   balance: "5000000",   delegate: null },
           { pk: $bp2,   balance: "5000000",   delegate: null },
           { pk: $whale, balance: "100000000", delegate: $bp1 },
-          { pk: $seed,  balance: "1000",      delegate: null }
-        ] } }' >"$OUT/runtime-config.json"
+          { pk: $seed,  balance: "1000",      delegate: null } ]')
+      ;;
+    minimal)
+      nodes="seed plain-1"
+      seed_bp=1
+      accounts=$(jq -n --arg whale "$(pub whale)" --arg seed "$(pub seed)" '[
+          { pk: $seed,  balance: "5000000",   delegate: null },
+          { pk: $whale, balance: "100000000", delegate: $seed } ]')
+      ;;
+    *)
+      echo "TOPOLOGY must be full or minimal, not '$TOPOLOGY'" >&2
+      exit 2
+      ;;
+  esac
+
+  # proof.level none: a Full-compiled daemon accepts it at run time, and it
+  # keeps several daemons within a laptop's memory.
+  jq -n --arg ts "$ts" --argjson slot "$SLOT_MS" --argjson accounts "$accounts" '
+    { genesis: { genesis_state_timestamp: $ts },
+      proof: { level: "none", block_window_duration_ms: $slot },
+      ledger: { name: "perf-local", add_genesis_winner: false, accounts: $accounts } }' \
+    >"$OUT/runtime-config.json"
 
   # The orchestrator must use the same genesis timestamp and slot length as
   # the daemons. It reaches the nodes by the addresses the uptime backend
@@ -95,19 +114,22 @@ cmd_genesis() {
   chmod 600 "$OUT/orchestrator-config.json"
 
   local wl=()
-  for n in $NODES; do wl+=("$(pub "$n")"); done
+  for n in $nodes; do wl+=("$(pub "$n")"); done
   printf '%s\n' "${wl[@]}" | jq -R . | jq -s '{ in_memory: true, whitelist: . }' \
     >"$OUT/uptime-backend.json"
 
-  # Values docker compose substitutes into the node commands.
+  # Values the node containers and smoke.sh read at run time.
   cat >"$OUT/nodes.env" <<EOF
 ITN_KEYS=$(cat "$KEYS/orchestrator_sk.pub"),$(cat "$KEYS/fetcher_sk.pub")
 SEED_PEER_ID=$(cat "$KEYS/seed-libp2p.peerid")
 SEED_PK=$(pub seed)
 WHALE_PK=$(pub whale)
 GENESIS_TIMESTAMP=$ts
+LOCAL_TOPOLOGY=$TOPOLOGY
+LOCAL_NODES="$nodes"
+SEED_BLOCK_PRODUCER=$seed_bp
 EOF
-  echo "genesis at $ts"
+  echo "genesis at $ts, topology $TOPOLOGY: $nodes"
 }
 
 case "${1:-}" in

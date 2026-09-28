@@ -24,6 +24,10 @@ case "$NODE_ROLE" in
     # stop including transactions.
     args+=(--seed --libp2p-keypair /keys/seed-libp2p
       --run-snark-worker "$SEED_PK" --snark-worker-fee 0.001)
+    # In the minimal topology the seed is also the only block producer.
+    if [ "${SEED_BLOCK_PRODUCER:-0}" = 1 ]; then
+      args+=(--block-producer-key /keys/seed)
+    fi
     ;;
   bp)
     args+=(--block-producer-key "/keys/$NODE_NAME")

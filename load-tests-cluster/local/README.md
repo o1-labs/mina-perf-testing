@@ -9,7 +9,8 @@ experiment end to end without a cluster.
 
 - Docker with Compose v2, and GNU make. The host needs nothing else: the
   scripts run inside the Mina image.
-- About 12 GB of free memory. Each of the 5 daemons uses 1–2 GB.
+- Free memory: about 14 GB for the full topology (5 daemons at up to about
+  2.7 GB each during an experiment), about 6 GB for the minimal one.
 - Docker Hub access for the base images. If a pull fails with
   `personal access token is expired`, log in again, or pull anonymously with
   `DOCKER_CONFIG=<a directory that holds {}> make up`.
@@ -45,11 +46,22 @@ Endpoints (all on `127.0.0.1`; set the `LOCAL_*_PORT` variables to change them):
 
 ## The network
 
-| Node | Role |
-|:--|:--|
-| `seed` | libp2p seed and the only snark worker |
-| `bp-1`, `bp-2` | block producers; `bp-1` also has the whale's stake |
-| `plain-1`, `plain-2` | nodes without a role, which receive load |
+`TOPOLOGY` selects the nodes. Give the same value to every `make` command
+(for example `make up smoke TOPOLOGY=minimal`), because `smoke` and `status`
+read it too.
+
+| Node | `TOPOLOGY=full` (default) | `TOPOLOGY=minimal` |
+|:--|:--|:--|
+| `seed` | libp2p seed and the only snark worker | seed, snark worker and the only block producer (with the whale's stake) |
+| `bp-1`, `bp-2` | block producers; `bp-1` also has the whale's stake | not started |
+| `plain-1` | node without a role, which receives load | node without a role, which receives load |
+| `plain-2` | node without a role, which receives load | not started |
+
+The minimal topology is for small machines and CI. On the machine it was
+tested on, `make up` to `PASS` took about 10 minutes, and the two daemons used
+about 2.6 GB each during the experiment. `bp-1`, `bp-2` and `plain-2` are in
+the compose profile `full`; `make up` removes all nodes first, so a change of
+topology does not leave nodes of the old chain running.
 
 All nodes use `minaprotocol/mina-daemon:4.0.0-6965b50-jammy-devnet`
 (`MINA_IMAGE`). They run with `proof.level: none` and 20 s slots, from a
