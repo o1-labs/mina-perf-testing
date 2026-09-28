@@ -151,3 +151,84 @@ func TestCancelDuringWaitIsCancelled(t *testing.T) {
 		})
 	}
 }
+
+// A cancel that lands mid-action makes the action return "context canceled",
+// which RunExperiment logs as an error. That line belongs in Logs, not in
+// Errors: an operator cancel is not a failure.
+func TestCancelMidActionIsNotAnError(t *testing.T) {
+	online := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer online.Close()
+
+	var mu sync.Mutex
+	var bodies []string
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hook.Close()
+
+	store := cancelTestStore(t)
+	notifier := NewWebhookNotifier(logging.Logger("cancel-midaction-test"))
+	notifier.validateURL = func(string) error { return nil }
+	notifier.checkDialIP = func(net.IP) error { return nil }
+	app := &App{Store: store, WebhookNotifier: notifier}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	now := time.Now()
+	if err := store.Add(&service.ExperimentState{
+		Name: "cancel-midaction", WebhookURL: hook.URL, Status: service.Running,
+		CreatedAt: now, UpdatedAt: now,
+	}, cancel); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	// Log through the store, as CreateExperimentHandler does; with a plain
+	// logger the error never reaches AppendErrorF and this passes vacuously.
+	log := service.StoreLogging{Store: store, Log: logging.Logger("cancel-midaction-run")}
+	cfg := lib.SetupConfig(ctx, lib.OrchestratorConfig{OnlineURL: online.URL}, log)
+	cfg.AllowUnverifiedMinaExec = true
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.loadRun(json.NewDecoder(strings.NewReader(`{"action":"discovery","params":{}}`)), cfg, log)
+	}()
+	time.Sleep(300 * time.Millisecond)
+	if err := store.Cancel(); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("loadRun did not return")
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	got := store.AtomicGet()
+	if got.Status != service.Cancelled {
+		t.Errorf("status = %q, want %q", got.Status, service.Cancelled)
+	}
+	if len(got.Errors) != 0 {
+		t.Errorf("errors = %q, want none -- a cancellation is not a failure", got.Errors)
+	}
+	inLogs := false
+	for _, l := range got.Logs {
+		if strings.Contains(l, "context canceled") {
+			inLogs = true
+		}
+	}
+	if !inLogs {
+		t.Errorf("the context-canceled message should still be in Logs; logs=%q", got.Logs)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 0 {
+		t.Errorf("want no webhook for a cancelled experiment, got %d: %v", len(bodies), bodies)
+	}
+}

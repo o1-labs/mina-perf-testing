@@ -625,6 +625,17 @@ func (s *Store) AppendErrorF(format string, args ...interface{}) error {
 		// until the worker finishes, so a second Add during that window
 		// returns ErrExperimentRunning rather than starting alongside it,
 		// which is the safer of the two.
+		//
+		// A cancel is not a failure. Once the operator has cancelled, the
+		// action's "context canceled" error is expected fallout: keep it in
+		// the log, not in Errors. This keys on the status the operator set,
+		// not on the message text, and still makes no status transition.
+		// Trade-off: an unrelated genuine error that arrives while the run is
+		// cancelling also goes to Logs; the run ends cancelled either way.
+		if experiment.Status == Cancelling {
+			experiment.Logs = append(experiment.Logs, message)
+			return
+		}
 		experiment.Errors = append(experiment.Errors, message)
 	})
 	return nil
