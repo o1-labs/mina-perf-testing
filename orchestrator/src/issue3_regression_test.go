@@ -50,10 +50,10 @@ func TestSelectNodesNeverReturnsZeroNodes(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			// selectNodes shuffles in place, so hand it a copy.
 			in := append([]NodeAddress(nil), nodes...)
-			perNodeTps, selected := selectNodes(c.tps, c.minTps, in)
+			perNodeTps, selected, _ := selectNodesWithFallback(c.tps, c.minTps, in)
 
 			if len(selected) == 0 {
-				t.Fatalf("selectNodes(tps=%v, minTps=%v, %d nodes) returned 0 nodes; "+
+				t.Fatalf("selectNodesWithFallback(tps=%v, minTps=%v, %d nodes) returned 0 nodes; "+
 					"SchedulePayments/SendZkappCommands would then panic on "+
 					"len(feePayers)/len(nodes) (issue #3)", c.tps, c.minTps, len(nodes))
 			}
@@ -62,13 +62,13 @@ func TestSelectNodesNeverReturnsZeroNodes(t *testing.T) {
 					len(selected), len(nodes))
 			}
 			if math.IsNaN(perNodeTps) || math.IsInf(perNodeTps, 0) {
-				t.Fatalf("selectNodes(tps=%v, minTps=%v) returned per-node tps %v; "+
+				t.Fatalf("selectNodesWithFallback(tps=%v, minTps=%v) returned per-node tps %v; "+
 					"this is serialised into the GraphQL payment/zkapp input",
 					c.tps, c.minTps, perNodeTps)
 			}
 			// Total tps handed to the daemons must not exceed what was asked for.
 			if total := perNodeTps * float64(len(selected)); total > c.tps+1e-9 {
-				t.Fatalf("selectNodes(tps=%v, minTps=%v) over-allocates: %d nodes x %v = %v",
+				t.Fatalf("selectNodesWithFallback(tps=%v, minTps=%v) over-allocates: %d nodes x %v = %v",
 					c.tps, c.minTps, len(selected), perNodeTps, total)
 			}
 			// The exact expression that panicked in issue #3.
@@ -110,9 +110,9 @@ func TestGenerateAt99PercentZkappRatioSelectsNodes(t *testing.T) {
 							continue
 						}
 						in := append([]NodeAddress(nil), nodes...)
-						_, selected := selectNodes(tps, minTps, in)
+						_, selected, _ := selectNodesWithFallback(tps, minTps, in)
 						if len(selected) == 0 {
-							t.Fatalf("round %d step %q: selectNodes(tps=%v, minTps=%v, %d nodes) "+
+							t.Fatalf("round %d step %q: selectNodesWithFallback(tps=%v, minTps=%v, %d nodes) "+
 								"returned 0 nodes -> integer divide by zero (issue #3)",
 								r, c.Action, tps, minTps, len(nodes))
 						}

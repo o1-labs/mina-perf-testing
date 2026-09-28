@@ -190,12 +190,26 @@ func (SampleAction) Run(config Config, rawParams json.RawMessage, output OutputF
 	rand.Shuffle(groupLen, func(i, j int) {
 		group[i], group[j] = group[j], group[i]
 	})
+	// Round cumulative boundaries rather than each ratio independently.
+	//
+	// Rounding each ratio against the original groupLen made every
+	// over-allocation fall on the last bucket: {0.2 x5} over 8 nodes gave
+	// [2 2 2 2 0], so the fifth group got nothing where its share is 1.6.
+	// Cumulative boundaries give [2 1 2 1 2]. The invariant prev <= end <=
+	// groupLen then holds by construction -- cum is non-decreasing because
+	// ratios are validated non-negative -- so the slicing cannot go out of
+	// range; the clamp below is kept only as a guard on the sum.
+	cum, prev := 0.0, 0
 	for i, r := range params.Ratios {
-		take := int(math.Round(r * float64(groupLen)))
-		output(fmt.Sprintf("group%d", i+1), group[:take], false, false)
-		group = group[take:]
+		cum += r
+		end := int(math.Round(cum * float64(groupLen)))
+		if end > groupLen {
+			end = groupLen
+		}
+		output(fmt.Sprintf("group%d", i+1), group[prev:end], false, false)
+		prev = end
 	}
-	output("rest", group, false, false)
+	output("rest", group[prev:], false, false)
 	return nil
 }
 
@@ -203,9 +217,9 @@ func (SampleAction) Name() string { return "sample" }
 
 var _ Action = SampleAction{}
 
-func selectNodes(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddress) {
+func selectNodesWithFallback(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddress, []NodeAddress) {
 	if len(nodes) == 0 {
-		return tps, nodes // Return empty slice if no nodes available
+		return tps, nodes, nil // Return empty slice if no nodes available
 	}
 
 	nodesF := math.Floor(tps / minTps)
@@ -218,12 +232,29 @@ func selectNodes(tps, minTps float64, nodes []NodeAddress) (float64, []NodeAddre
 	}
 
 	if nodesMax >= len(nodes) {
-		return tps / float64(len(nodes)), nodes
+		return tps / float64(len(nodes)), nodes, nil
 	}
 	rand.Shuffle(len(nodes), func(i, j int) {
 		nodes[i], nodes[j] = nodes[j], nodes[i]
 	})
-	return tps / nodesF, nodes[:nodesMax]
+	return tps / nodesF, nodes[:nodesMax], nodes[nodesMax:]
+}
+
+// sleepOrCancel waits for d, or returns as soon as the context is cancelled.
+//
+// A bare time.Sleep in a retry loop is unreachable by POST /experiment/cancel:
+// the longest single pause here is 8 minutes and in DiscoverParticipants it is
+// 20, and the check at the top of each iteration does nothing while the sleep
+// is in progress. The operator asked for the run to stop, so it stops.
+func sleepOrCancel(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func retryOnMultipleServers(servers []string, ctx context.Context, serverIx int, commandName string, log logging.StandardLogger, try func(string) error) (err error) {
@@ -244,7 +275,9 @@ func retryOnMultipleServers(servers []string, ctx context.Context, serverIx int,
 		}
 		if retryPause <= 8 {
 			log.Warnf("Failed to run %s command, retrying in %d minutes: %s", commandName, retryPause, err)
-			time.Sleep(time.Duration(retryPause) * time.Minute)
+			if err := sleepOrCancel(ctx, time.Duration(retryPause)*time.Minute); err != nil {
+				return err
+			}
 		}
 		if len(servers) > 0 {
 			serverIx = (serverIx + 1) % len(servers)
