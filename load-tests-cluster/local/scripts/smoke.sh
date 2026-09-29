@@ -11,6 +11,7 @@ set -euo pipefail
 
 ORCH=http://orchestrator-service:9090/api/v0/experiment
 ONLINE=http://uptime-backend:8080/v1/online
+ROSETTA=http://rosetta:3087
 # shellcheck disable=SC1091
 . /out/nodes.env
 # The nodes of the current topology (local-env.sh genesis).
@@ -53,6 +54,60 @@ wait_for() { # description timeout_sec command...
   echo "ok: $what ($((SECONDS - start))s)"
 }
 
+# --- archive and Rosetta (ARCHIVE=1 sets ARCHIVE_ADDRESS in nodes.env) -----
+
+rosetta() { # endpoint json
+  curl -sf -m 10 -H 'Content-Type: application/json' -d "$2" "$ROSETTA/$1"
+}
+
+network_id() { rosetta network/list '{}' | jq -c '.network_identifiers[0]'; }
+
+archive_tip() {
+  rosetta network/status "{\"network_identifier\": $(network_id)}" |
+    jq -r '.current_block_identifier.index // empty' 2>/dev/null || true
+}
+
+# User commands (payments) of the experiment in the seed's best chain.
+experiment_payments() {
+  gql seed '{ bestChain(maxLength: 290) { transactions { userCommands { from } } } }' |
+    jq --arg w "$WHALE_PK" '[.data.bestChain[].transactions.userCommands[].from
+      | select(. != $w)] | length'
+}
+
+# The archive gets blocks from the seed, so its tip may be a block or two
+# behind. It is also checked to hold the same block 2 as the seed, and at
+# least as many user commands as the experiment put in the best chain.
+# Rosetta's search/transactions counts user commands only, not zkApp
+# commands.
+check_archive() {
+  local want seed_h
+  want=$(experiment_payments)
+  seed_h=$(height seed)
+  seed_h=$(height seed)
+  wait_for "archive tip within 2 blocks of the seed ($seed_h)" 180 \
+    bash -c "t=\$(bash \"$0\" _archive_tip); [ -n \"\$t\" ] && [ \"\$t\" -ge $((seed_h - 2)) ]"
+
+  local net a_hash s_hash
+  net=$(network_id)
+  a_hash=$(rosetta block "{\"network_identifier\": $net, \"block_identifier\": {\"index\": 2}}" |
+    jq -r '.block.block_identifier.hash')
+  s_hash=$(gql seed '{ block(height: 2) { stateHash } }' | jq -r '.data.block.stateHash')
+  if [ -z "$a_hash" ] || [ "$a_hash" != "$s_hash" ]; then
+    echo "FAIL: block 2 differs: archive '$a_hash', seed '$s_hash'" >&2
+    return 1
+  fi
+  echo "ok: block 2 is the same in the archive and on the seed ($a_hash)"
+
+  local total
+  total=$(rosetta search/transactions "{\"network_identifier\": $net, \"limit\": 1}" |
+    jq -r '.total_count')
+  echo "user commands: $total in the archive (Rosetta search), $want of the experiment in the best chain"
+  if [ "$total" -lt "$want" ]; then
+    echo "FAIL: the archive holds fewer user commands than the best chain has from the experiment" >&2
+    return 1
+  fi
+}
+
 cmd_status() {
   echo "genesis: $GENESIS_TIMESTAMP"
   for n in $NODES; do printf '%-8s height %s\n' "$n" "$(height "$n" || true)"; done
@@ -60,6 +115,9 @@ cmd_status() {
   echo "discovered by uptime backend: $(online_count) of $N_NODES"
   curl -sf -m 5 "$ORCH/status" | jq -c '.result | {name, status, step, step_name, errors}' 2>/dev/null ||
     echo "orchestrator: no experiment yet"
+  if [ -n "${ARCHIVE_ADDRESS:-}" ]; then
+    echo "archive tip (Rosetta): $(archive_tip)"
+  fi
 }
 
 cmd_run() {
@@ -117,6 +175,9 @@ cmd_run() {
     echo "FAIL: no experiment transaction reached a block" >&2
     return 1
   fi
+  if [ -n "${ARCHIVE_ADDRESS:-}" ]; then
+    check_archive
+  fi
   echo "PASS"
 }
 
@@ -125,5 +186,6 @@ case "${1:-}" in
   run) cmd_run ;;
   _height) height "$2" ;;
   _online) online_count ;;
+  _archive_tip) archive_tip ;;
   *) echo "usage: $0 status|run" >&2; exit 2 ;;
 esac

@@ -45,7 +45,11 @@ services:
   seed:
     <<: *node
     environment: { <<: *node-env, NODE_NAME: seed, NODE_ROLE: seed }
-    depends_on: [uptime-backend]
+    # With ARCHIVE=1 the seed sends every block to the archive; it starts
+    # after the archive listens, so the archive gets the chain from block 1.
+    depends_on:
+      uptime-backend: { condition: service_started }
+      archive: { condition: service_healthy, required: false }
     ports:
       - "127.0.0.1:${LOCAL_SEED_GRAPHQL_PORT:-3085}:3085"
   # bp-1, bp-2 and plain-2 run only in the full topology (profile "full",
@@ -174,6 +178,68 @@ services:
     depends_on: [log-fetcher, experiments-api]
     ports:
       - "127.0.0.1:${LOCAL_DASHBOARD_PORT:-4200}:80"
+
+  # Archive node and Rosetta (profile "archive", which the Makefile sets for
+  # ARCHIVE=1). The archive database is separate from the perf-testing one,
+  # has no named volume, and `make up` removes it: every chain starts with an
+  # empty archive.
+  archive-db:
+    image: postgres:${POSTGRES_VERSION:-16-alpine}
+    profiles: [archive]
+    networks: [perf-local]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LOCAL_PG_PASSWORD:-local}
+      POSTGRES_DB: archive
+    ports:
+      - "127.0.0.1:${LOCAL_ARCHIVE_PG_PORT:-55434}:5432"
+
+  archive:
+    image: ${MINA_ARCHIVE_IMAGE:-minaprotocol/mina-archive:4.0.0-6965b50-jammy-devnet}
+    profiles: [archive]
+    networks: [perf-local]
+    depends_on: [archive-db]
+    entrypoint: ["bash", "/local/archive-entrypoint.sh"]
+    environment:
+      ARCHIVE_DB_URI: postgres://postgres:${LOCAL_PG_PASSWORD:-local}@archive-db:5432/archive
+    volumes:
+      - ./generated/runtime-config.json:/local/runtime-config.json:ro
+      - ./scripts/archive-entrypoint.sh:/local/archive-entrypoint.sh:ro
+    # Port 3086 (0x0C0E) in LISTEN state (0A). A TCP probe would work too,
+    # but the archive logs every connection that sends no RPC handshake as
+    # an error.
+    healthcheck:
+      test: ["CMD", "grep", "-q", ":0C0E 00000000:0000 0A", "/proc/net/tcp"]
+      interval: 3s
+      timeout: 2s
+      retries: 60
+      start_period: 10s
+
+  rosetta:
+    image: ${MINA_ROSETTA_IMAGE:-minaprotocol/mina-rosetta:4.0.0-6965b50-jammy-devnet}
+    profiles: [archive]
+    networks: [perf-local]
+    depends_on:
+      archive: { condition: service_healthy }
+      seed: { condition: service_healthy }
+    environment:
+      # Required: Rosetta exits at start without it. The archive database
+      # keeps the default 100 connections, and the archive uses some too.
+      MINA_ROSETTA_MAX_DB_POOL_SIZE: "32"
+    # The flags take their value as a separate argument; `--port=3087` is
+    # rejected as an unknown flag.
+    entrypoint:
+      - mina-rosetta
+      - --port
+      - "3087"
+      - --archive-uri
+      - postgres://postgres:${LOCAL_PG_PASSWORD:-local}@archive-db:5432/archive
+      - --graphql-uri
+      - http://seed:3085/graphql
+      - --log-level
+      - Info
+    ports:
+      - "127.0.0.1:${LOCAL_ROSETTA_PORT:-3087}:3087"
 
   # Not started by `up`; the Makefile runs the generator and the smoke test
   # in it, on the compose network, so the host needs no jq or curl.

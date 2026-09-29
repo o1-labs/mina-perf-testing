@@ -28,6 +28,10 @@ case "$NODE_ROLE" in
     if [ "${SEED_BLOCK_PRODUCER:-0}" = 1 ]; then
       args+=(--block-producer-key /keys/seed)
     fi
+    # With ARCHIVE=1 the seed sends every block it accepts to the archive.
+    if [ -n "${ARCHIVE_ADDRESS:-}" ]; then
+      args+=(--archive-address "$ARCHIVE_ADDRESS")
+    fi
     ;;
   bp)
     args+=(--block-producer-key "/keys/$NODE_NAME")
