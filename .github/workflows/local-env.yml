@@ -1,0 +1,73 @@
+name: Local environment
+
+# Starts the private Mina network and the whole perf-testing stack from
+# load-tests-cluster/local (minimal topology: 2 nodes), and runs one short
+# experiment through the orchestrator service. See that directory's README.
+on:
+  pull_request:
+    paths:
+      - "orchestrator/**"
+      - "uptime-backend/**"
+      - "load-tests-cluster/**"
+      - ".github/workflows/local-env.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: local-env-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TOPOLOGY: minimal
+    defaults:
+      run:
+        working-directory: load-tests-cluster/local
+    steps:
+      - uses: actions/checkout@v4
+
+      # The images (Mina daemon, orchestrator service with its mina package,
+      # trace consumer, ...) need more disk than the runner has free.
+      - name: Free disk space
+        working-directory: .
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL
+          docker image prune -af >/dev/null
+          df -h /
+
+      - name: Start the network and the stack
+        run: make up
+
+      - name: Run the smoke experiment
+        run: make smoke
+
+      - name: Status
+        if: always()
+        run: make status || true
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          for s in $(COMPOSE_PROFILES=full,archive docker compose -p perf-local ps -a --services); do
+            COMPOSE_PROFILES=full,archive docker compose -p perf-local logs --no-color "$s" \
+              >"$RUNNER_TEMP/logs/$s.log" 2>&1 || true
+          done
+          for s in seed plain-1; do
+            c=$(COMPOSE_PROFILES=full docker compose -p perf-local ps -aq "$s") || continue
+            [ -n "$c" ] && docker cp "$c:/root/.mina-config/mina.log" "$RUNNER_TEMP/logs/$s-mina.log" || true
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-env-logs
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+
+      - name: Clean up
+        if: always()
+        run: make clean

@@ -1,0 +1,254 @@
+# A private Mina network and the whole perf-testing stack on one machine.
+# Use the Makefile; it generates ./generated first. See README.md.
+
+x-node: &node
+  image: ${MINA_IMAGE:-minaprotocol/mina-daemon:4.0.0-6965b50-jammy-devnet}
+  entrypoint: ["bash", "/local/node-entrypoint.sh"]
+  env_file: generated/nodes.env
+  networks: [perf-local]
+  # A daemon exits if its uptime SNARK worker does not connect within 60 s
+  # (Uptime_snark_worker.create). With five daemons starting at once it
+  # took about 60 s here, so the nodes start in waves (seed, then the block
+  # producers, then the plain nodes), each after the previous wave's worker
+  # is up. The restart is a second safety net; a restarted node bootstraps
+  # from its peers.
+  restart: on-failure:5
+  healthcheck:
+    test: ["CMD", "grep", "-q", "Uptime snark worker process has PID", "/root/.mina-config/mina.log"]
+    interval: 5s
+    timeout: 3s
+    retries: 60
+    start_period: 10s
+  volumes:
+    - ./generated/keys:/keys:ro
+    - ./generated/runtime-config.json:/local/runtime-config.json:ro
+    - ./scripts/node-entrypoint.sh:/local/node-entrypoint.sh:ro
+  environment: &node-env
+    ITN_FEATURES: "1"
+    MINA_PRIVKEY_PASS: ${LOCAL_KEY_PASS:-local}
+    UPTIME_PRIVKEY_PASS: ${LOCAL_KEY_PASS:-local}
+    MINA_LIBP2P_PASS: ${LOCAL_KEY_PASS:-local}
+    MINA_CLIENT_TRUSTLIST: &subnet 10.77.0.0/24
+
+networks:
+  perf-local:
+    ipam:
+      config:
+        # Fixed so the daemons can trust the client RPC port (8301) from the
+        # orchestrator, which funds keys through it.
+        - subnet: *subnet
+
+volumes:
+  pgdata:
+
+services:
+  seed:
+    <<: *node
+    environment: { <<: *node-env, NODE_NAME: seed, NODE_ROLE: seed }
+    # With ARCHIVE=1 the seed sends every block to the archive; it starts
+    # after the archive listens, so the archive gets the chain from block 1.
+    depends_on:
+      uptime-backend: { condition: service_started }
+      archive: { condition: service_healthy, required: false }
+    ports:
+      - "127.0.0.1:${LOCAL_SEED_GRAPHQL_PORT:-3085}:3085"
+  # bp-1, bp-2 and plain-2 run only in the full topology (profile "full",
+  # which the Makefile sets for TOPOLOGY=full). In the minimal topology the
+  # seed also produces blocks, and plain-1 is the second node.
+  bp-1:
+    <<: *node
+    profiles: [full]
+    environment: { <<: *node-env, NODE_NAME: bp-1, NODE_ROLE: bp }
+    depends_on: &wave2
+      uptime-backend: { condition: service_started }
+      seed: { condition: service_healthy }
+  bp-2:
+    <<: *node
+    profiles: [full]
+    environment: { <<: *node-env, NODE_NAME: bp-2, NODE_ROLE: bp }
+    depends_on: *wave2
+  plain-1:
+    <<: *node
+    environment: { <<: *node-env, NODE_NAME: plain-1, NODE_ROLE: plain }
+    depends_on: &wave3
+      uptime-backend: { condition: service_started }
+      seed: { condition: service_healthy }
+      bp-1: { condition: service_healthy, required: false }
+      bp-2: { condition: service_healthy, required: false }
+  plain-2:
+    <<: *node
+    profiles: [full]
+    environment: { <<: *node-env, NODE_NAME: plain-2, NODE_ROLE: plain }
+    depends_on: *wave3
+
+  # Records each node's address and ITN GraphQL port from its uptime
+  # submissions; the orchestrator and the trace fetcher discover nodes here.
+  uptime-backend:
+    build: ../../uptime-backend
+    image: mina-perf-testing-local/uptime-backend
+    networks: [perf-local]
+    environment:
+      # Any non-empty value selects the testnet signature network id. The
+      # devnet daemons sign their submissions for testnet; with "" the
+      # backend verifies for mainnet and answers "Invalid signature".
+      NETWORK: testnet
+      CONFIG_FILE: /local/uptime-backend.json
+    volumes:
+      - ./generated/uptime-backend.json:/local/uptime-backend.json:ro
+    ports:
+      - "127.0.0.1:${LOCAL_UPTIME_PORT:-8080}:8080"
+
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16-alpine}
+    networks: [perf-local]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LOCAL_PG_PASSWORD:-local}
+      POSTGRES_DB: logs
+      MINA_RELEASE: ${MINA_RELEASE:-4.0.0-6965b50-jammy-devnet}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../init-sql:/init-sql:ro
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d logs"]
+      interval: 2s
+      retries: 30
+    ports:
+      - "127.0.0.1:${LOCAL_PG_PORT:-55433}:5432"
+
+  orchestrator-service:
+    build:
+      context: ../../orchestrator
+      dockerfile: Dockerfile-service
+    image: mina-perf-testing-local/orchestrator-service
+    networks: [perf-local]
+    depends_on:
+      postgres: { condition: service_healthy }
+      uptime-backend: { condition: service_started }
+    environment:
+      PSQL_CONNECTION_STRING: "host=postgres user=postgres password=${LOCAL_PG_PASSWORD:-local} dbname=logs sslmode=disable"
+      CONFIG: /local/orchestrator-config.json
+      MINA_PRIVKEY_PASS: ${LOCAL_KEY_PASS:-local}
+      ITN_FEATURES: "1"
+    volumes:
+      - ./generated/orchestrator-config.json:/local/orchestrator-config.json:ro
+      - ./generated/keys:/keys:ro
+    ports:
+      - "127.0.0.1:${LOCAL_ORCHESTRATOR_PORT:-9090}:9090"
+
+  log-fetcher:
+    image: o1labs/mina-perf-testing:internal-trace-consumer-persistence
+    networks: [perf-local]
+    depends_on:
+      postgres: { condition: service_healthy }
+    command: "fetcher -k /keys/fetcher_sk -o /output --db-uri postgresql://postgres:${LOCAL_PG_PASSWORD:-local}@postgres:5432/logs discovery"
+    environment:
+      INTERNAL_TRACE_CONSUMER_EXE: /internal_trace_consumer
+      HANDLE_STATUS_CHANGE: "true"
+      FETCH_INTERVAL_MS: "5000"
+      ONLINE_URL: http://uptime-backend:8080/v1/online
+    volumes:
+      - ./generated/keys/fetcher_sk:/keys/fetcher_sk:ro
+    ports:
+      - "127.0.0.1:${LOCAL_FETCHER_PORT:-4000}:4000"
+
+  log-api:
+    image: o1labs/mina-perf-testing:internal-trace-consumer-persistence
+    networks: [perf-local]
+    depends_on:
+      postgres: { condition: service_healthy }
+    command: "consumer serve --db-uri postgresql://postgres:${LOCAL_PG_PASSWORD:-local}@postgres:5432/logs"
+    ports:
+      - "127.0.0.1:${LOCAL_LOG_API_PORT:-9080}:9080"
+
+  experiments-api:
+    image: o1labs/mina-perf-testing:experiments-api-persistence
+    networks: [perf-local]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PSQL_CONNECTION_STRING: "postgresql://postgres:${LOCAL_PG_PASSWORD:-local}@postgres:5432/logs"
+    ports:
+      - "127.0.0.1:${LOCAL_EXPERIMENTS_API_PORT:-3003}:3003"
+
+  dashboard:
+    image: o1labs/mina-perf-testing:dashboard-persistence
+    networks: [perf-local]
+    depends_on: [log-fetcher, experiments-api]
+    ports:
+      - "127.0.0.1:${LOCAL_DASHBOARD_PORT:-4200}:80"
+
+  # Archive node and Rosetta (profile "archive", which the Makefile sets for
+  # ARCHIVE=1). The archive database is separate from the perf-testing one,
+  # has no named volume, and `make up` removes it: every chain starts with an
+  # empty archive.
+  archive-db:
+    image: postgres:${POSTGRES_VERSION:-16-alpine}
+    profiles: [archive]
+    networks: [perf-local]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LOCAL_PG_PASSWORD:-local}
+      POSTGRES_DB: archive
+    ports:
+      - "127.0.0.1:${LOCAL_ARCHIVE_PG_PORT:-55434}:5432"
+
+  archive:
+    image: ${MINA_ARCHIVE_IMAGE:-minaprotocol/mina-archive:4.0.0-6965b50-jammy-devnet}
+    profiles: [archive]
+    networks: [perf-local]
+    depends_on: [archive-db]
+    entrypoint: ["bash", "/local/archive-entrypoint.sh"]
+    environment:
+      ARCHIVE_DB_URI: postgres://postgres:${LOCAL_PG_PASSWORD:-local}@archive-db:5432/archive
+    volumes:
+      - ./generated/runtime-config.json:/local/runtime-config.json:ro
+      - ./scripts/archive-entrypoint.sh:/local/archive-entrypoint.sh:ro
+    # Port 3086 (0x0C0E) in LISTEN state (0A). A TCP probe would work too,
+    # but the archive logs every connection that sends no RPC handshake as
+    # an error.
+    healthcheck:
+      test: ["CMD", "grep", "-q", ":0C0E 00000000:0000 0A", "/proc/net/tcp"]
+      interval: 3s
+      timeout: 2s
+      retries: 60
+      start_period: 10s
+
+  rosetta:
+    image: ${MINA_ROSETTA_IMAGE:-minaprotocol/mina-rosetta:4.0.0-6965b50-jammy-devnet}
+    profiles: [archive]
+    networks: [perf-local]
+    depends_on:
+      archive: { condition: service_healthy }
+      seed: { condition: service_healthy }
+    environment:
+      # Required: Rosetta exits at start without it. The archive database
+      # keeps the default 100 connections, and the archive uses some too.
+      MINA_ROSETTA_MAX_DB_POOL_SIZE: "32"
+    # The flags take their value as a separate argument; `--port=3087` is
+    # rejected as an unknown flag.
+    entrypoint:
+      - mina-rosetta
+      - --port
+      - "3087"
+      - --archive-uri
+      - postgres://postgres:${LOCAL_PG_PASSWORD:-local}@archive-db:5432/archive
+      - --graphql-uri
+      - http://seed:3085/graphql
+      - --log-level
+      - Info
+    ports:
+      - "127.0.0.1:${LOCAL_ROSETTA_PORT:-3087}:3087"
+
+  # Not started by `up`; the Makefile runs the generator and the smoke test
+  # in it, on the compose network, so the host needs no jq or curl.
+  tools:
+    image: ${MINA_IMAGE:-minaprotocol/mina-daemon:4.0.0-6965b50-jammy-devnet}
+    profiles: [tools]
+    entrypoint: ["bash"]
+    networks: [perf-local]
+    working_dir: /local
+    volumes:
+      - ./scripts:/local/scripts:ro
+      - ./generated:/out
