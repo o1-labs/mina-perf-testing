@@ -11,6 +11,9 @@ experiment end to end without a cluster.
   scripts run inside the Mina image.
 - Free memory: about 14 GB for the full topology (5 daemons at up to about
   2.7 GB each during an experiment), about 6 GB for the minimal one.
+- The `internal-trace-consumer` submodule: `log-fetcher` and `log-api` are
+  built from it (`git submodule update --init internal-trace-consumer`). The
+  first build takes about 7 minutes.
 - Docker Hub access for the base images. If a pull fails with
   `personal access token is expired`, log in again, or pull anonymously with
   `DOCKER_CONFIG=<a directory that holds {}> make up`.
@@ -31,6 +34,15 @@ nodes) and sets genesis 180 s in the future. On a 16-core machine the first
 blocks came about 3 minutes after `make up`, and all 5 nodes were in
 `/v1/online` about 1 minute later. `make smoke` waits for both, and then
 runs an experiment of about 10 minutes.
+
+`make smoke` passes when:
+
+- the experiment ends with status `success` and no errors;
+- transactions of the experiment are in the seed's best chain;
+- the log fetcher found every node (`log-fetcher:4000/nodes`), which proves
+  its signed ITN GraphQL (mina-sdk `itn`) works, and the log-api has block
+  traces for each of them, which proves the whole trace pipeline (fetcher,
+  consumer, Postgres, log-api) works.
 
 Endpoints (all on `127.0.0.1`; set the `LOCAL_*_PORT` variables to change them):
 

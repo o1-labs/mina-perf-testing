@@ -137,8 +137,12 @@ services:
     ports:
       - "127.0.0.1:${LOCAL_ORCHESTRATOR_PORT:-9090}:9090"
 
+  # log-fetcher and log-api are built from the internal-trace-consumer
+  # submodule, so a change there (the Rust fetcher and its mina-sdk ITN
+  # client, the OCaml consumer) is tested here; they share one image.
   log-fetcher:
-    image: o1labs/mina-perf-testing:internal-trace-consumer-persistence
+    build: ../../internal-trace-consumer
+    image: mina-perf-testing-local/internal-trace-consumer
     networks: [perf-local]
     depends_on:
       postgres: { condition: service_healthy }
@@ -154,7 +158,8 @@ services:
       - "127.0.0.1:${LOCAL_FETCHER_PORT:-4000}:4000"
 
   log-api:
-    image: o1labs/mina-perf-testing:internal-trace-consumer-persistence
+    build: ../../internal-trace-consumer
+    image: mina-perf-testing-local/internal-trace-consumer
     networks: [perf-local]
     depends_on:
       postgres: { condition: service_healthy }
