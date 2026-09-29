@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Khan/genqlient/graphql"
+	"github.com/MinaProtocol/mina-sdk-go/itn"
 	logging "github.com/ipfs/go-log/v2"
 )
 
@@ -23,7 +23,7 @@ func prefixByTime(t time.Time) string {
 
 type Node struct {
 	Address NodeAddress
-	Client  graphql.Client
+	Client  *itn.Client
 }
 
 type DiscoveryParams struct {

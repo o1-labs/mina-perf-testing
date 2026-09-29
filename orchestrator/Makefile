@@ -1,18 +1,17 @@
 tidy:
 	cd src && go mod tidy
 
-src/graphql_generated.go: genqlient.graphql schema.graphql
-	cd src && go get github.com/Khan/genqlient/generate@v0.5.0 && go run github.com/Khan/genqlient ../genqlient.yaml && cd ..
-
-orchestrator: src/graphql_generated.go $(shell find src/ -type f)
+orchestrator: $(shell find src/ -type f)
 	cd src/itn_orchestrator/ && go build -o ../../orchestrator && cd ..
 
-orchestrator_service: src/graphql_generated.go $(shell find src/ -type f)
+orchestrator_service: $(shell find src/ -type f)
 	cd src/orchestrator_service/ && go build -o ../../orchestrator_service && cd ..
 
-generator: src/graphql_generated.go $(shell find src/ -type f)
+generator: $(shell find src/ -type f)
 	cd src/generator/ && go build -o ../../generator && cd ..
 
+# src/graphql_generated.go is what genqlient used to write; an old copy would
+# now clash with itn_inputs.go, so clean still removes it.
 clean:
 	rm -f generator orchestrator orchestrator_service src/graphql_generated.go
 

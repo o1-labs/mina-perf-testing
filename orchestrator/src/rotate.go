@@ -1,12 +1,15 @@
 package itn_orchestrator
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
+
+	mina "github.com/MinaProtocol/mina-sdk-go"
 )
 
 type RotateParams struct {
@@ -91,59 +94,65 @@ func (RotateAction) Run(config Config, rawParams json.RawMessage, output OutputF
 
 func (RotateAction) Name() string { return "rotate-balance" }
 
-func getBalance(config Config, restServer, pubkey string) (result uint64, err error) {
-	args := []string{
-		"client", "get-balance",
-		"--public-key", pubkey,
-	}
-	if restServer != "" {
-		args = append(args, "--rest-server", restServer)
-	}
-	err = execScanMina(config.Ctx, config.MinaExec, args, nil, func(scanner *bufio.Scanner) error {
-		for scanner.Scan() {
-			if scanner.Text() == "Balance:" && scanner.Scan() {
-				balanceStr := scanner.Text()
-				if !scanner.Scan() || scanner.Text() != "mina" {
-					return errors.New("unexpected currency")
-				}
-				var err error
-				result, err = parseMina(balanceStr)
-				return err
-			}
+// restServerGraphQL turns a rotation server, given in the form of the mina
+// CLI's --rest-server, into a GraphQL endpoint: a port number means
+// http://127.0.0.1:<port>/graphql, a URL is used as it is (with /graphql
+// added when it has no path), and host:port means http://host:port/graphql.
+// An empty value is the daemon's default endpoint.
+func restServerGraphQL(restServer string) string {
+	switch {
+	case restServer == "":
+		return mina.DefaultGraphQLURI
+	case isDigits(restServer):
+		return "http://127.0.0.1:" + restServer + "/graphql"
+	case strings.Contains(restServer, "://"):
+		if u, err := url.Parse(restServer); err == nil && (u.Path == "" || u.Path == "/") {
+			u.Path = "/graphql"
+			return u.String()
 		}
-		return errors.New("didn't get balance")
+		return restServer
+	default:
+		return "http://" + restServer + "/graphql"
+	}
+}
+
+func isDigits(s string) bool {
+	_, err := strconv.ParseUint(s, 10, 16)
+	return err == nil
+}
+
+// publicClient is a client for a daemon's public GraphQL. Like the mina CLI
+// it replaced, it makes one attempt; the callers retry across servers.
+func publicClient(restServer string) *mina.Client {
+	return mina.NewClient(mina.WithGraphQLURI(restServerGraphQL(restServer)), mina.WithRetries(1))
+}
+
+func getBalance(_ Config, restServer, pubkey string) (uint64, error) {
+	client := publicClient(restServer)
+	defer client.Close()
+	account, err := client.GetAccount(pubkey, "")
+	if err != nil {
+		return 0, err
+	}
+	return account.Balance.Total.Nanomina(), nil
+}
+
+func sendPayment(_ Config, restServer, senderPk, receiverPk string, amount, fee uint64) error {
+	client := publicClient(restServer)
+	defer client.Close()
+	_, err := client.SendPayment(mina.SendPaymentParams{
+		Sender:   senderPk,
+		Receiver: receiverPk,
+		Amount:   mina.CurrencyFromNanomina(amount),
+		Fee:      mina.CurrencyFromNanomina(fee),
+		Memo:     "rotation",
 	})
-	return
+	return err
 }
 
-func formatMina(amount uint64) string {
-	s := strconv.FormatUint(amount, 10)
-	return s[:len(s)-9] + "." + s[len(s)-9:]
-}
-
-func sendPayment(config Config, restServer, senderPk, receiverPk string, amount, fee uint64) error {
-	args := []string{
-		"client", "send-payment",
-		"--sender", senderPk,
-		"--receiver", receiverPk,
-		"--amount", formatMina(amount),
-		"--fee", formatMina(fee),
-		"--memo", "rotation",
-	}
-	if restServer != "" {
-		args = append(args, "--rest-server", restServer)
-	}
-	return execMina(config.Ctx, config.MinaExec, args, nil)
-}
-
-func unlockPrivkey(config Config, restServer, pubkey, password string) error {
-	args := []string{
-		"accounts", "unlock",
-		"--public-key", pubkey,
-	}
-	if restServer != "" {
-		args = append(args, "--rest-server", restServer)
-	}
-	env := []string{"MINA_PRIVKEY_PASS=" + password}
-	return execMina(config.Ctx, config.MinaExec, args, env)
+func unlockPrivkey(_ Config, restServer, pubkey, password string) error {
+	client := publicClient(restServer)
+	defer client.Close()
+	_, err := client.UnlockAccount(pubkey, password)
+	return err
 }

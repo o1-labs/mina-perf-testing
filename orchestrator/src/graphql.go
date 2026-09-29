@@ -1,57 +1,18 @@
 package itn_orchestrator
 
 import (
-	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"strings"
 
-	"github.com/Khan/genqlient/graphql"
+	mina "github.com/MinaProtocol/mina-sdk-go"
+	"github.com/MinaProtocol/mina-sdk-go/itn"
 )
 
-type DoerWithStatus struct {
-	Doer           graphql.Doer
-	LastStatusCode int
-}
-
-type Authenticator struct {
-	sk    ed25519.PrivateKey
-	pkStr string
-	doer  DoerWithStatus
-}
-
-func (doer *DoerWithStatus) Do(req *http.Request) (*http.Response, error) {
-	resp, err := doer.Doer.Do(req)
-	if err == nil {
-		doer.LastStatusCode = resp.StatusCode
-	}
-	return resp, err
-}
-
-type SequentialAuthenticator struct {
-	authenticator *Authenticator
-	uuid          string
-	seqno         uint16
-}
-
-func NewAuthenticator(sk ed25519.PrivateKey, doer graphql.Doer) *Authenticator {
-	pk := sk.Public().(ed25519.PublicKey)
-	return &Authenticator{
-		sk: sk, doer: DoerWithStatus{Doer: doer}, pkStr: base64.StdEncoding.EncodeToString(pk),
-	}
-}
-
-func NewSequentialAuthenticator(uuid string, seqno uint16, authenticator *Authenticator) *SequentialAuthenticator {
-	return &SequentialAuthenticator{
-		authenticator: authenticator,
-		uuid:          uuid,
-		seqno:         seqno,
-	}
-}
+// The daemon's ITN GraphQL server is reached through mina-sdk-go's itn
+// package, which signs requests with config.Sk and handles the server
+// UUID, the sequence numbers and a new auth after a daemon restart.
 
 func readBody(req *http.Request) ([]byte, error) {
 	readCloser, err := req.GetBody()
@@ -62,80 +23,38 @@ func readBody(req *http.Request) ([]byte, error) {
 	return io.ReadAll(readCloser)
 }
 
-func (client *Authenticator) Do(req *http.Request) (*http.Response, error) {
-	body, err := readBody(req)
-	if err != nil {
-		return nil, err
-	}
-	sig := ed25519.Sign(client.sk, body)
-	sigStr := base64.StdEncoding.EncodeToString(sig)
-	req.Header.Set("Authorization", "Signature "+client.pkStr+" "+sigStr)
-	return client.doer.Do(req)
-}
-
-var _ graphql.Doer = (*Authenticator)(nil)
-
-func (client *SequentialAuthenticator) Do(req *http.Request) (*http.Response, error) {
-	body, err := readBody(req)
-	if err != nil {
-		return nil, err
-	}
-	uuid := []byte(client.uuid)
-	msg := make([]byte, len(body)+len(client.uuid)+2)
-	binary.BigEndian.PutUint16(msg, client.seqno)
-	copy(msg[2:], uuid)
-	copy(msg[2+len(uuid):], body)
-	sig := ed25519.Sign(client.authenticator.sk, msg)
-	sigStr := base64.StdEncoding.EncodeToString(sig)
-	header := strings.Join([]string{
-		"Signature",
-		client.authenticator.pkStr,
-		sigStr,
-		"; Sequencing",
-		client.uuid,
-		strconv.Itoa(int(client.seqno)),
-	}, " ")
-	req.Header.Set("Authorization", header)
-	client.seqno++
-	return client.authenticator.doer.Do(req)
-}
-
-var _ graphql.Doer = (*SequentialAuthenticator)(nil)
-
 func NewGqlClient(config Config, addr NodeAddress) (*NodeEntry, error) {
 	url := "http://" + string(addr) + "/graphql"
-	httpClient := http.DefaultClient
+	opts := []itn.Option{itn.WithRetries(1)}
 	if config.PrintRequests {
-		rt := RoundTripper{logger: config.Log}
-		httpClient = &http.Client{Transport: rt}
+		opts = append(opts, itn.WithHTTPClient(&http.Client{Transport: RoundTripper{logger: config.Log}}))
 	}
-	authenticator := NewAuthenticator(config.Sk, httpClient)
-	authClient := graphql.NewClient(url, authenticator)
-	resp, err := auth(config.Ctx, authClient)
+	client := itn.NewClient(url, itn.KeyFromSeed(config.Sk.Seed()), opts...)
+	auth, err := client.Auth(config.Ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to authorize client %s: %v", addr, err)
 	}
-	seqAuthenticator := NewSequentialAuthenticator(resp.Auth.ServerUuid, resp.Auth.SignerSequenceNumber, authenticator)
-	client := graphql.NewClient(url, seqAuthenticator)
-	return &NodeEntry{
-		Client:          client,
-		Libp2pPort:      resp.Auth.Libp2pPort,
-		PeerId:          resp.Auth.PeerId,
-		IsBlockProducer: resp.Auth.IsBlockProducer,
-		LastStatusCode:  &authenticator.doer.LastStatusCode,
-	}, nil
+	entry := &NodeEntry{Client: client}
+	entry.setAuth(auth)
+	return entry, nil
 }
 
-func GetGqlClient(config Config, addr NodeAddress) (graphql.Client, *int, error) {
+func (e *NodeEntry) setAuth(auth *itn.Auth) {
+	e.Libp2pPort = auth.Libp2pPort
+	e.PeerId = auth.PeerID
+	e.IsBlockProducer = auth.IsBlockProducer
+}
+
+func GetGqlClient(config Config, addr NodeAddress) (*itn.Client, error) {
 	if entry, has := config.NodeData[addr]; has {
-		return entry.Client, entry.LastStatusCode, nil
+		return entry.Client, nil
 	}
 	entry, err := NewGqlClient(config, addr)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	config.NodeData[addr] = *entry
-	return entry.Client, entry.LastStatusCode, nil
+	return entry.Client, nil
 }
 
 // GqlRequestError carries the HTTP status a node answered with, so a caller
@@ -162,7 +81,7 @@ func (e *GqlRequestError) Unwrap() error { return e.Err }
 // Permanent reports whether the same request would be refused by any node.
 //
 // 4xx is the daemon saying the request is wrong, with three exceptions: 408
-// and 429 are load, and 412 is the sequence-number rejection wrapGqlRequest
+// and 429 are load, and 412 is the sequence-number rejection the client
 // already retries. Anything else, a transport failure included, may be this
 // node alone.
 func (e *GqlRequestError) Permanent() bool {
@@ -173,81 +92,103 @@ func (e *GqlRequestError) Permanent() bool {
 	return e.StatusCode >= 400 && e.StatusCode < 500
 }
 
-func wrapGqlRequest(config Config, nodeAddress NodeAddress, perform func(client graphql.Client) (any, error)) (any, error) {
-	client, lastCode, err := GetGqlClient(config, nodeAddress)
+// statusOf returns the HTTP status behind an itn client error: the one the
+// daemon answered with, 200 for a GraphQL error (the daemon reports those
+// in a 200 response), or 0 when no answer came.
+func statusOf(err error) int {
+	var unauthorized *itn.UnauthorizedError
+	var sequencing *itn.SequencingError
+	var httpErr *itn.HTTPError
+	var gqlErr *mina.GraphQLError
+	switch {
+	case errors.As(err, &unauthorized):
+		return http.StatusUnauthorized
+	case errors.As(err, &sequencing):
+		return http.StatusPreconditionFailed
+	case errors.As(err, &httpErr):
+		return httpErr.StatusCode
+	case errors.As(err, &gqlErr):
+		return http.StatusOK
+	}
+	return 0
+}
+
+func wrapGqlRequest[T any](config Config, nodeAddress NodeAddress, perform func(client *itn.Client) (T, error)) (T, error) {
+	var zero T
+	client, err := GetGqlClient(config, nodeAddress)
 	if err != nil {
-		return "", fmt.Errorf("failed to create a client for %s: %v", nodeAddress, err)
+		return zero, fmt.Errorf("failed to create a client for %s: %v", nodeAddress, err)
 	}
 	resp, err := perform(client)
-	if err != nil && *lastCode == 412 {
-		config.Log.Infof("received sequencing error code (412), retrying request to %s, error: %v", nodeAddress, err)
-		delete(config.NodeData, nodeAddress)
-		var client graphql.Client
-		client, _, err = GetGqlClient(config, nodeAddress)
-		if err != nil {
-			return "", fmt.Errorf("failed to create a replacement client for %s: %v", nodeAddress, err)
+	// The client runs auth again by itself after a daemon restart; keep the
+	// node's peer ID, libp2p port and role current for the gating actions.
+	if auth := client.LastAuth(); auth != nil {
+		if entry, has := config.NodeData[nodeAddress]; has && entry.Client == client {
+			entry.setAuth(auth)
+			config.NodeData[nodeAddress] = entry
 		}
-		resp, err = perform(client)
 	}
 	if err != nil {
-		code := 0
-		if lastCode != nil {
-			code = *lastCode
-		}
-		return resp, &GqlRequestError{Node: nodeAddress, StatusCode: code, Err: err}
+		return resp, &GqlRequestError{Node: nodeAddress, StatusCode: statusOf(err), Err: err}
 	}
 	return resp, nil
 }
 
 func SchedulePaymentsGql(config Config, nodeAddress NodeAddress, input PaymentsDetails) (string, error) {
-	resp, err := wrapGqlRequest(config, nodeAddress, func(client graphql.Client) (any, error) {
-		return schedulePayments(config.Ctx, client, input)
+	handle, err := wrapGqlRequest(config, nodeAddress, func(client *itn.Client) (string, error) {
+		return client.SchedulePayments(config.Ctx, input.toItn())
 	})
 	if err != nil {
 		return "", fmt.Errorf("error scheduling payments to %s: %w", nodeAddress, err)
 	}
-	return resp.(*schedulePaymentsResponse).SchedulePayments, nil
+	return handle, nil
 }
 
 func StopTransactionsGql(config Config, nodeAddress NodeAddress, handle string) (string, error) {
-	resp, err := wrapGqlRequest(config, nodeAddress, func(client graphql.Client) (any, error) {
-		return stopScheduledTransactions(config.Ctx, client, handle)
+	resp, err := wrapGqlRequest(config, nodeAddress, func(client *itn.Client) (string, error) {
+		return client.StopScheduledTransactions(config.Ctx, handle)
 	})
 	if err != nil {
 		return "", fmt.Errorf("error stoping transactions at %s on %s: %v", handle, nodeAddress, err)
 	}
-	return resp.(*stopScheduledTransactionsResponse).StopScheduledTransactions, nil
+	return resp, nil
 }
 
 func ScheduleZkappCommands(config Config, nodeAddress NodeAddress, input ZkappCommandsDetails) (string, error) {
-	resp, err := wrapGqlRequest(config, nodeAddress, func(client graphql.Client) (any, error) {
-		return scheduleZkappCommands(config.Ctx, client, input)
+	handle, err := wrapGqlRequest(config, nodeAddress, func(client *itn.Client) (string, error) {
+		return client.ScheduleZkappCommands(config.Ctx, input.toItn())
 	})
 	if err != nil {
 		return "", fmt.Errorf("error scheduling zkapp txs to %s: %w", nodeAddress, err)
 	}
-	return resp.(*scheduleZkappCommandsResponse).ScheduleZkappCommands, nil
+	return handle, nil
 }
 
 func SlotsWonGql(config Config, nodeAddress NodeAddress) ([]int, bool, error) {
-	resp, err := wrapGqlRequest(config, nodeAddress, func(client graphql.Client) (any, error) {
-		if config.NodeData[nodeAddress].IsBlockProducer {
-			return slotsWon(config.Ctx, client)
+	var isBlockProducer bool
+	slots, err := wrapGqlRequest(config, nodeAddress, func(client *itn.Client) ([]int64, error) {
+		if !config.NodeData[nodeAddress].IsBlockProducer {
+			return nil, nil
 		}
-		return nil, nil
+		isBlockProducer = true
+		return client.SlotsWon(config.Ctx)
 	})
 	if err != nil {
 		return nil, true, fmt.Errorf("failed to get slots for %s: %v", nodeAddress, err)
 	}
-	if resp == nil {
+	if !isBlockProducer {
 		return nil, false, nil
 	}
-	return resp.(*slotsWonResponse).SlotsWon, true, nil
+	out := make([]int, len(slots))
+	for i, s := range slots {
+		out[i] = int(s)
+	}
+	return out, true, nil
 }
 
 func UpdateGatingGql(config Config, nodeAddress NodeAddress, input GatingUpdate) error {
-	_, err := wrapGqlRequest(config, nodeAddress, func(client graphql.Client) (any, error) {
-		return updateGating(config.Ctx, client, input)
+	_, err := wrapGqlRequest(config, nodeAddress, func(client *itn.Client) (string, error) {
+		return client.UpdateGating(config.Ctx, input.toItn())
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update gating for %s: %v", nodeAddress, err)
@@ -257,21 +198,21 @@ func UpdateGatingGql(config Config, nodeAddress NodeAddress, input GatingUpdate)
 }
 
 func StopDaemonGql(config Config, nodeAddress NodeAddress, clean bool, delaySec int) (string, error) {
-	resp, err := wrapGqlRequest(config, nodeAddress, func(client graphql.Client) (any, error) {
-		return stopDaemon(config.Ctx, client, clean, delaySec)
+	resp, err := wrapGqlRequest(config, nodeAddress, func(client *itn.Client) (string, error) {
+		return client.StopDaemon(config.Ctx, &delaySec, clean)
 	})
 	if err != nil {
 		return "", fmt.Errorf("error stoping daemon on %s (delay %d): %v", nodeAddress, delaySec, err)
 	}
-	return resp.(*stopDaemonResponse).StopDaemon, nil
+	return resp, nil
 }
 
 func SetZkappSoftLimitGql(config Config, nodeAddress NodeAddress, limit *int) (*int, error) {
-	resp, err := wrapGqlRequest(config, nodeAddress, func(client graphql.Client) (any, error) {
-		return setZkappSoftLimit(config.Ctx, client, limit)
+	resp, err := wrapGqlRequest(config, nodeAddress, func(client *itn.Client) (*int, error) {
+		return client.SetZkappCommandLimit(config.Ctx, limit)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error setting zkapp soft limit on %s: %v", nodeAddress, err)
 	}
-	return resp.(*setZkappSoftLimitResponse).ZkAppCommandLimit, nil
+	return resp, nil
 }
