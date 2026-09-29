@@ -12,6 +12,8 @@ set -euo pipefail
 ORCH=http://orchestrator-service:9090/api/v0/experiment
 ONLINE=http://uptime-backend:8080/v1/online
 ROSETTA=http://rosetta:3087
+FETCHER=http://log-fetcher:4000
+LOG_API=http://log-api:9080/graphql
 # shellcheck disable=SC1091
 . /out/nodes.env
 # The nodes of the current topology (local-env.sh genesis).
@@ -52,6 +54,36 @@ wait_for() { # description timeout_sec command...
     sleep 5
   done
   echo "ok: $what ($((SECONDS - start))s)"
+}
+
+# --- trace pipeline: log-fetcher (mina-sdk ITN client) -> consumer -> log-api -
+
+# The log-api name of each node the fetcher found: the last 8 characters of
+# its submitter key, its IP and its ITN port (internal-log-fetcher node.rs).
+fetcher_node_names() {
+  curl -sf -m 5 "$FETCHER/nodes" |
+    jq -r '.[] | "\(.submitter_pk[-8:])-\(.ip)-\(.graphql_port)"' 2>/dev/null || true
+}
+
+fetcher_node_count() { curl -sf -m 5 "$FETCHER/nodes" | jq length 2>/dev/null || echo 0; }
+
+# Number of block traces the log-api has for a node.
+node_traces() {
+  curl -sf -m 10 -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg n "$1" '{query: "{ blockTraces(node_name: \"\($n)\", deployment_id: 1, maxLength: 20) }"}')" \
+    "$LOG_API" | jq '.data.blockTraces.traces | length' 2>/dev/null || echo 0
+}
+
+# The fetcher reads each node's internal logs over ITN GraphQL; the consumer
+# turns them into block traces in Postgres, which the log-api serves.
+check_traces() {
+  wait_for "the log fetcher found all $N_NODES nodes" 300 \
+    bash -c "[ \"\$(bash \"$0\" _fetcher_nodes)\" -ge $N_NODES ]"
+  local name
+  for name in $(fetcher_node_names); do
+    wait_for "block traces of $name in the log-api" 300 \
+      bash -c "[ \"\$(bash \"$0\" _node_traces $name)\" -ge 1 ]"
+  done
 }
 
 # --- archive and Rosetta (ARCHIVE=1 sets ARCHIVE_ADDRESS in nodes.env) -----
@@ -115,6 +147,7 @@ cmd_status() {
   echo "discovered by uptime backend: $(online_count) of $N_NODES"
   curl -sf -m 5 "$ORCH/status" | jq -c '.result | {name, status, step, step_name, errors}' 2>/dev/null ||
     echo "orchestrator: no experiment yet"
+  echo "nodes known to the log fetcher: $(fetcher_node_count) of $N_NODES"
   if [ -n "${ARCHIVE_ADDRESS:-}" ]; then
     echo "archive tip (Rosetta): $(archive_tip)"
   fi
@@ -175,6 +208,7 @@ cmd_run() {
     echo "FAIL: no experiment transaction reached a block" >&2
     return 1
   fi
+  check_traces
   if [ -n "${ARCHIVE_ADDRESS:-}" ]; then
     check_archive
   fi
@@ -187,5 +221,7 @@ case "${1:-}" in
   _height) height "$2" ;;
   _online) online_count ;;
   _archive_tip) archive_tip ;;
+  _fetcher_nodes) fetcher_node_count ;;
+  _node_traces) node_traces "$2" ;;
   *) echo "usage: $0 status|run" >&2; exit 2 ;;
 esac

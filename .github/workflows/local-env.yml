@@ -9,6 +9,8 @@ on:
       - "orchestrator/**"
       - "uptime-backend/**"
       - "load-tests-cluster/**"
+      # A submodule bump changes this path (the gitlink), not files under it.
+      - "internal-trace-consumer"
       - ".github/workflows/local-env.yml"
   workflow_dispatch:
 
@@ -27,6 +29,12 @@ jobs:
         working-directory: load-tests-cluster/local
     steps:
       - uses: actions/checkout@v4
+
+      # log-fetcher and log-api are built from this submodule; mina-frontend
+      # is not needed.
+      - name: Check out the internal-trace-consumer submodule
+        working-directory: .
+        run: git submodule update --init internal-trace-consumer
 
       # The images (Mina daemon, orchestrator service with its mina package,
       # trace consumer, ...) need more disk than the runner has free.

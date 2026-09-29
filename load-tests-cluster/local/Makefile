@@ -55,6 +55,7 @@ genesis: keys
 # build, hence the first `genesis` when it is missing. Only the images of
 # the current setting are pulled.
 images: keys
+	@[ -f ../../internal-trace-consumer/Dockerfile ] || { echo "the internal-trace-consumer submodule is missing; run: git submodule update --init internal-trace-consumer" >&2; exit 1; }
 	@[ -f generated/nodes.env ] || $(LOCAL_ENV) genesis
 	$(COMPOSE) pull --ignore-buildable --quiet
 	$(COMPOSE) build
