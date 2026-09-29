@@ -17,7 +17,7 @@ func Isolate(config Config, params IsolateParams) error {
 		host := string(address[:strings.IndexRune(string(address), ':')])
 		nd, has := config.NodeData[address]
 		if !has {
-			_, _, err := GetGqlClient(config, address)
+			_, err := GetGqlClient(config, address)
 			if err != nil {
 				return fmt.Errorf("failed to authenticate peer %s: %v", address, err)
 			}

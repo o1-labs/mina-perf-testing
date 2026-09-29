@@ -1,16 +1,13 @@
 package itn_orchestrator
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"math/rand"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -339,43 +336,6 @@ func parseMina(str string) (uint64, error) {
 	}
 	rem *= pow10s[9-remlen]
 	return base + rem, nil
-}
-
-func execMina(ctx context.Context, minaExec string, args, env []string) error {
-	ctx, cancelF := context.WithCancel(ctx)
-	defer cancelF()
-	cmd := exec.CommandContext(ctx, minaExec, args...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	cmd.Env = env
-	return cmd.Run()
-}
-
-func execScanMina(ctx context.Context, minaExec string, args, env []string, scan func(*bufio.Scanner) error) error {
-	ctx, cancelF := context.WithCancel(ctx)
-	defer cancelF()
-	cmd := exec.CommandContext(ctx, minaExec, args...)
-	var stdout io.ReadCloser
-	{
-		var err error
-		if stdout, err = cmd.StdoutPipe(); err != nil {
-			return err
-		}
-	}
-	cmd.Stderr = os.Stderr
-	cmd.Env = env
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	scanner := bufio.NewScanner(stdout)
-	scanner.Split(bufio.ScanWords)
-	if err := scan(scanner); err != nil {
-		return err
-	}
-	if err := stdout.Close(); err != nil {
-		return err
-	}
-	return cmd.Wait()
 }
 
 func SetOrDefault[T any](src *T, dst *T, def T) {

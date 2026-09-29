@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Khan/genqlient/graphql"
+	"github.com/MinaProtocol/mina-sdk-go/itn"
 	logging "github.com/ipfs/go-log/v2"
 )
 
@@ -34,11 +34,10 @@ type Command struct {
 type NodeAddress string
 
 type NodeEntry struct {
-	Client          graphql.Client
+	Client          *itn.Client
 	Libp2pPort      uint16
 	PeerId          string
 	IsBlockProducer bool
-	LastStatusCode  *int
 }
 
 type Config struct {
