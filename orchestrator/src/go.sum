@@ -1,7 +1,7 @@
 github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/MinaProtocol/mina-sdk-go v0.3.1-0.20260929124020-c54b67212454 h1:aKZnJhWgslvIskKwHZvv7OnLs1EJXXcB02qRxh4NnN0=
-github.com/MinaProtocol/mina-sdk-go v0.3.1-0.20260929124020-c54b67212454/go.mod h1:Osq89KGf6Osn1yOS0CbuxtAtT7vZyR+qe0NLM1eezhI=
+github.com/MinaProtocol/mina-sdk-go v0.3.1-0.20260929132002-7c04a3422049 h1:vzZB0synjSB8NhyRUYDW7LK4PXdoZ4t1wI7WJ+ADGKw=
+github.com/MinaProtocol/mina-sdk-go v0.3.1-0.20260929132002-7c04a3422049/go.mod h1:Osq89KGf6Osn1yOS0CbuxtAtT7vZyR+qe0NLM1eezhI=
 github.com/aead/siphash v1.0.1/go.mod h1:Nywa3cDsYNNK3gaciGTWPwHt0wlpNV15vwmswBAUSII=
 github.com/aws/aws-sdk-go-v2 v1.21.1 h1:wjHYshtPpYOZm+/mu3NhVgRRc0baM6LJZOmxPZ5Cwzs=
 github.com/aws/aws-sdk-go-v2 v1.21.1/go.mod h1:ErQhvNuEMhJjweavOYhxVkn2RUx7kQXVATHrjKtxIpM=
