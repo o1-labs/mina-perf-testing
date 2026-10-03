@@ -88,6 +88,9 @@ func fundRunImpl(config Config, ctx context.Context, daemonPortIx int, params Fu
 	if params.PasswordEnv != "" {
 		password, _ = os.LookupEnv(params.PasswordEnv)
 	}
+	if len(config.FundItnNodes) > 0 {
+		return fundViaItn(config, ctx, params, amountPerKey, password)
+	}
 	return retryOnMultipleServers(config.FundDaemonPorts, ctx, daemonPortIx, "fund", config.Log, func(daemonPort string) error {
 		return fundImpl(config, ctx, daemonPort, params, amountPerKey, password)
 	})

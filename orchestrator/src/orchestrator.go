@@ -44,6 +44,8 @@ func init() {
 	addAction(actions, RotateAction{})
 	addAction(actions, SetZkappSoftLimitAction{})
 	addAction(actions, SlotsCoveredCheckAction{})
+	addAction(actions, StopAllScheduledAction{})
+	addAction(actions, PreflightAction{})
 }
 
 type AwsConfig struct {
@@ -74,13 +76,17 @@ func loadAwsCredentials(filename string, log logging.EventLogger) {
 }
 
 type OrchestratorConfig struct {
-	LogLevel         zapcore.Level `json:",omitempty"`
-	LogFile          string        `json:",omitempty"`
-	Key              itn_json_types.Ed25519Privkey
-	Aws              *AwsConfig `json:"aws,omitempty"`
-	OnlineURL        string     `json:"onlineURL,omitempty"`
-	FundDaemonPorts  []string   `json:",omitempty"`
-	MinaExec         string     `json:",omitempty"`
+	LogLevel        zapcore.Level `json:",omitempty"`
+	LogFile         string        `json:",omitempty"`
+	Key             itn_json_types.Ed25519Privkey
+	Aws             *AwsConfig `json:"aws,omitempty"`
+	OnlineURL       string     `json:"onlineURL,omitempty"`
+	FundDaemonPorts []string   `json:",omitempty"`
+	// FundItnNodes: see Config.FundItnNodes.
+	FundItnNodes []string `json:",omitempty"`
+	// HandleJournal: see Config.HandleJournal.
+	HandleJournal    string `json:",omitempty"`
+	MinaExec         string `json:",omitempty"`
 	SlotDurationMs   int
 	GenesisTimestamp itn_json_types.Time
 	ControlExec      string   `json:",omitempty"`
@@ -244,6 +250,7 @@ func SetupConfig(ctx context.Context, orchestratorConfig OrchestratorConfig, log
 		Sk:               ed25519.PrivateKey(orchestratorConfig.Key),
 		Log:              log,
 		FundDaemonPorts:  orchestratorConfig.FundDaemonPorts,
+		HandleJournal:    orchestratorConfig.HandleJournal,
 		MinaExec:         orchestratorConfig.MinaExec,
 		NodeData:         nodeData,
 		SlotDurationMs:   orchestratorConfig.SlotDurationMs,
@@ -254,6 +261,9 @@ func SetupConfig(ctx context.Context, orchestratorConfig OrchestratorConfig, log
 		PrintRequests:    orchestratorConfig.PrintRequests,
 
 		AllowUnverifiedMinaExec: orchestratorConfig.AllowUnverifiedMinaExec,
+	}
+	for _, addr := range orchestratorConfig.FundItnNodes {
+		config.FundItnNodes = append(config.FundItnNodes, NodeAddress(addr))
 	}
 	if config.MinaExec == "" {
 		config.MinaExec = "mina"

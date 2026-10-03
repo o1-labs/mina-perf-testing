@@ -7,6 +7,10 @@ LOCAL_KEY_PASS ?= local
 TOPOLOGY ?= full
 # 1: also run an archive node (fed by the seed), its database, and Rosetta.
 ARCHIVE ?= 0
+# 1: the daemons have the ITN harness operations (MinaProtocol/mina#19616), so
+# the orchestrator funds keys through ITN createAccounts on the seed and
+# journals its scheduling handles. Needs a MINA_IMAGE with that daemon.
+ITN_HARNESS ?= 0
 export MINA_IMAGE LOCAL_KEY_PASS
 
 , := ,
@@ -36,6 +40,7 @@ CHAIN := seed bp-1 bp-2 plain-1 plain-2 archive archive-db rosetta
 # stay owned by them.
 LOCAL_ENV := docker run --rm -u $(shell id -u):$(shell id -g) \
 	-e MINA_PRIVKEY_PASS=$(LOCAL_KEY_PASS) -e OUT=/out -e TOPOLOGY=$(TOPOLOGY) -e ARCHIVE=$(ARCHIVE) \
+	-e ITN_HARNESS=$(ITN_HARNESS) \
 	-v $(CURDIR)/generated:/out -v $(CURDIR)/scripts:/scripts:ro \
 	--entrypoint bash $(MINA_IMAGE) /scripts/local-env.sh
 
@@ -53,11 +58,12 @@ genesis: keys
 # Pulls and builds first, then writes the genesis, so that the genesis delay
 # starts when the containers do. Compose needs generated/nodes.env even to
 # build, hence the first `genesis` when it is missing. Only the images of
-# the current setting are pulled.
+# the current setting are pulled, and only when missing, so that a locally
+# built MINA_IMAGE (for example a daemon under test) works.
 images: keys
 	@[ -f ../../internal-trace-consumer/Dockerfile ] || { echo "the internal-trace-consumer submodule is missing; run: git submodule update --init internal-trace-consumer" >&2; exit 1; }
 	@[ -f generated/nodes.env ] || $(LOCAL_ENV) genesis
-	$(COMPOSE) pull --ignore-buildable --quiet
+	$(COMPOSE) pull --ignore-buildable --policy missing --quiet
 	$(COMPOSE) build
 
 # Every `up` starts a new chain: the genesis timestamp is fresh, and the
