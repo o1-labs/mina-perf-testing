@@ -174,6 +174,45 @@ To generate many keys from a single originating key, use the following action:
 When no `password-env` is provided, empty password will be used to decode the originating private key (`./root-key`)
 and to encode new private keys (`./keys/key-0`, `./keys/key-1` ...).
 
+### Funding through the ITN server
+
+With `"FundItnNodes": ["host:itn-port", ...]` in config.json, `fund-keys` does
+not run the `mina` client. It calls the ITN mutation `createAccounts` on one of
+these daemons (one job per funding key), writes the new keys to the same key
+files (`<prefix>-<i>-<n>`, encrypted with the password, plus `.pub` files), and
+waits until the daemon no longer lists the job. The daemons need
+MinaProtocol/mina#19616. Without `FundItnNodes`, `fund-keys` uses the `mina`
+client and `FundDaemonPorts` as before.
+
+## Daemons with ITN harness support
+
+A daemon with MinaProtocol/mina#19616 reports its build (`commitId`), accepts a
+handle that the caller chooses for each scheduler, and lists its running
+schedulers. The orchestrator detects this per node when it connects:
+
+- **Write-ahead handles.** For such nodes, the orchestrator chooses the handle
+  of each payment and zkApp scheduler and, with `"HandleJournal": "<file>"` in
+  config.json, appends `{time, node, kind, handle}` to that file before the
+  request. A scheduling request with a known handle is repeated after a
+  transport error, because the daemon starts nothing for a handle that already
+  runs. Older nodes use the old mutations.
+- **`stop-all-scheduled`** stops every scheduler that the nodes list, whoever
+  started it, so it also stops load whose handles were lost:
+
+  ```json
+  { "action": "stop-all-scheduled", "params": { "nodes": ["host:3086"] } }
+  ```
+
+  Without `nodes`, it stops the schedulers on every node the orchestrator knows.
+- **`preflight`** fails when a node has no harness support, when the nodes run
+  different builds, or when a node does not run `expectCommit` (a commit or a
+  prefix of it). Components of different builds hang rather than fail, so run
+  it before sending load:
+
+  ```json
+  { "action": "preflight", "params": { "nodes": ["host:3086"], "expectCommit": "a0ba151" } }
+  ```
+
 ## Debug Printout
 
 You can enable debug printout of graphql requests by adding 

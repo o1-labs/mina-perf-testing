@@ -38,6 +38,12 @@ type NodeEntry struct {
 	Libp2pPort      uint16
 	PeerId          string
 	IsBlockProducer bool
+
+	// HarnessSupport is set when the daemon has the ITN operations of
+	// MinaProtocol/mina#19616 (caller handles, createAccounts,
+	// scheduledTransactions, commitId); CommitID is then its build.
+	HarnessSupport bool
+	CommitID       string
 }
 
 type Config struct {
@@ -53,8 +59,16 @@ type Config struct {
 	ControlExec        string
 	StopDaemonDelaySec int
 	FundDaemonPorts    []string
-	UrlOverrides       []string
-	PrintRequests      bool
+	// FundItnNodes are ITN GraphQL addresses (host:port) of daemons with
+	// harness support. When set, fund-keys creates accounts with the ITN
+	// createAccounts mutation instead of the mina client and FundDaemonPorts.
+	FundItnNodes []NodeAddress
+	// HandleJournal, when set, is a file to which each scheduling handle is
+	// appended before the request that uses it (write-ahead), so that load
+	// can be found and stopped after a restart.
+	HandleJournal string
+	UrlOverrides  []string
+	PrintRequests bool
 
 	// AllowUnverifiedMinaExec — see OrchestratorConfig.
 	AllowUnverifiedMinaExec bool
