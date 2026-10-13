@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -112,14 +113,42 @@ func isTransportError(err error) bool {
 // empty, in a stable order.
 func (config Config) nodesOrAll(nodes []NodeAddress) []NodeAddress {
 	if len(nodes) > 0 {
-		return nodes
+		return dedupeByResolvedAddress(nodes)
 	}
 	all := make([]NodeAddress, 0, len(config.NodeData))
 	for addr := range config.NodeData {
 		all = append(all, addr)
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i] < all[j] })
-	return all
+	return dedupeByResolvedAddress(all)
+}
+
+// lookupHost resolves a host name; tests replace it.
+var lookupHost = net.LookupHost
+
+// dedupeByResolvedAddress keeps one address per node. The node table can
+// hold the same daemon twice: by the IP that discovery recorded and by the
+// name in FundItnNodes (for example 10.77.0.4:3086 and seed:3086), and
+// stop-all then sent every stop request twice. Addresses that resolve to
+// the same ip:port count as one; the first in the input order stays. An
+// address that does not resolve is kept as it is.
+func dedupeByResolvedAddress(addrs []NodeAddress) []NodeAddress {
+	seen := map[string]bool{}
+	out := make([]NodeAddress, 0, len(addrs))
+	for _, addr := range addrs {
+		key := string(addr)
+		if host, port, err := net.SplitHostPort(string(addr)); err == nil && net.ParseIP(host) == nil {
+			if ips, err := lookupHost(host); err == nil && len(ips) > 0 {
+				key = net.JoinHostPort(ips[0], port)
+			}
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, addr)
+	}
+	return out
 }
 
 type StopAllScheduledParams struct {

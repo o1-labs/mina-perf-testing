@@ -119,3 +119,29 @@ func TestOnlyTransportErrorsAreRepeated(t *testing.T) {
 		t.Errorf("a GraphQL error was repeated: %d calls, err %v", calls, err)
 	}
 }
+
+func TestDedupeByResolvedAddress(t *testing.T) {
+	orig := lookupHost
+	defer func() { lookupHost = orig }()
+	lookupHost = func(host string) ([]string, error) {
+		switch host {
+		case "seed":
+			return []string{"10.77.0.4"}, nil
+		case "bp-1":
+			return []string{"10.77.0.9"}, nil
+		}
+		return nil, errors.New("no such host")
+	}
+	got := dedupeByResolvedAddress([]NodeAddress{
+		"10.77.0.4:3086", "10.77.0.9:3086", "seed:3086", "bp-1:3086", "bp-1:3087", "unknown:3086", "unknown:3086",
+	})
+	want := []NodeAddress{"10.77.0.4:3086", "10.77.0.9:3086", "bp-1:3087", "unknown:3086"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
