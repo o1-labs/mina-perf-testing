@@ -117,7 +117,12 @@ services:
     ports:
       - "127.0.0.1:${LOCAL_PG_PORT:-55433}:5432"
 
+  # Postgres passes its healthcheck once during its first start, before it
+  # restarts after initdb, so a dependent service can still find the port
+  # closed; the restart covers that (seen once: "Cannot open DB ...
+  # connection refused", and the service stayed down).
   orchestrator-service:
+    restart: on-failure:5
     build:
       context: ../../orchestrator
       dockerfile: Dockerfile-service
@@ -141,6 +146,7 @@ services:
   # submodule, so a change there (the Rust fetcher and its mina-sdk ITN
   # client, the OCaml consumer) is tested here; they share one image.
   log-fetcher:
+    restart: on-failure:5
     build: ../../internal-trace-consumer
     image: mina-perf-testing-local/internal-trace-consumer
     networks: [perf-local]
@@ -158,6 +164,7 @@ services:
       - "127.0.0.1:${LOCAL_FETCHER_PORT:-4000}:4000"
 
   log-api:
+    restart: on-failure:5
     build: ../../internal-trace-consumer
     image: mina-perf-testing-local/internal-trace-consumer
     networks: [perf-local]
@@ -168,6 +175,7 @@ services:
       - "127.0.0.1:${LOCAL_LOG_API_PORT:-9080}:9080"
 
   experiments-api:
+    restart: on-failure:5
     image: o1labs/mina-perf-testing:experiments-api-persistence
     networks: [perf-local]
     depends_on:
