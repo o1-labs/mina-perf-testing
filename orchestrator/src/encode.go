@@ -1,7 +1,9 @@
 package itn_orchestrator
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -139,7 +141,12 @@ func RunExperiment(inDecoder *json.Decoder, config Config, log logging.StandardL
 		handlePrevAction, &actionAccum, rconfig, &prevAction, &preBatchComments, &postBatchComments, &batchStartStep)
 	if err != nil {
 		if orchErr, ok := err.(*OrchestratorError); ok {
-			log.Errorf("Experiment finished with error: %v", orchErr)
+			if errors.Is(orchErr, context.Canceled) {
+				// An operator cancel is not a failure; the status says cancelled.
+				log.Infof("Experiment cancelled: %v", orchErr)
+			} else {
+				log.Errorf("Experiment finished with error: %v", orchErr)
+			}
 			return orchErr
 		}
 		return err

@@ -231,6 +231,12 @@ func decideMinaClient(e clientEvidence) (execPath, warning string, err error) {
 
 // verifyMinaClient gathers the evidence, applies the decision, and records it.
 func (a *App) verifyMinaClient(config *lib.Config, log logging.StandardLogger) error {
+	// With FundItnNodes, fund-keys uses the daemons' createAccounts mutation
+	// and no mina client runs, so there is nothing to verify.
+	if len(config.FundItnNodes) > 0 {
+		log.Infof("fund-keys uses ITN createAccounts on %v; no mina client is needed", config.FundItnNodes)
+		return nil
+	}
 	e := clientEvidence{
 		configuredExec:  config.MinaExec,
 		allowUnverified: config.AllowUnverifiedMinaExec,
@@ -268,6 +274,20 @@ func (a *App) verifyMinaClient(config *lib.Config, log logging.StandardLogger) e
 	return nil
 }
 
+// stopLeftoverLoad stops every scheduler on the nodes the run used. It runs
+// with its own context, because the run's context is cancelled by then.
+func (a *App) stopLeftoverLoad(config lib.Config, log logging.StandardLogger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	config.Ctx = ctx
+	err := lib.StopAllScheduled(config, lib.StopAllScheduledParams{}, func(addr lib.NodeAddress, handle string) {
+		a.Store.AppendLogF("Stopped scheduler %s on %s after the run ended", handle, addr)
+	})
+	if err != nil {
+		log.Warnf("stopping the load left after the run: %v", err)
+	}
+}
+
 // stdoutLog is the stdlib logger under a name the `log logging.StandardLogger`
 // parameters do not shadow.
 var stdoutLog = log.Default()
@@ -303,6 +323,12 @@ func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.St
 	}
 
 	err := lib.RunExperiment(inDecoder, config, log)
+
+	// Load still running after a failed or cancelled run has no owner: stop
+	// every scheduler the run's nodes list (daemons with ITN harness support).
+	if err != nil || config.Ctx.Err() != nil {
+		a.stopLeftoverLoad(config, log)
+	}
 
 	// A cancel is not always an error. RunActions returns *nil* when it sees
 	// ctx.Done between steps (orchestrator.go), so a cancel landing during a

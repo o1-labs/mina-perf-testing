@@ -162,8 +162,14 @@ func (inputData *GeneratorInputData) ValidateExperimentName(validationErrors []s
 		validationErrors = append(validationErrors, "Experiment name is required")
 		valid = false
 	}
-	if len(*inputData.ExperimentName) > 50 {
-		validationErrors = append(validationErrors, "Experiment name must be less than 50 characters")
+	// The name goes into every transaction memo as "<name>-<round>-<batch>",
+	// and a memo holds at most 32 characters (Signed_command_memo). The
+	// daemon refuses longer memos only when the payments step schedules
+	// them, after funding; refuse the name here instead.
+	if len(*inputData.ExperimentName) > lib.MaxExperimentNameLen {
+		validationErrors = append(validationErrors, fmt.Sprintf(
+			"Experiment name must be at most %d characters, so that memos "+
+				"(\"<name>-<round>-<batch>\") fit in 32", lib.MaxExperimentNameLen))
 		valid = false
 	}
 	if strings.Contains(*inputData.ExperimentName, " ") {
@@ -174,8 +180,8 @@ func (inputData *GeneratorInputData) ValidateExperimentName(validationErrors []s
 	for _, char := range illegalChars {
 		if strings.Contains(*inputData.ExperimentName, char) {
 			validationErrors = append(validationErrors, fmt.Sprintf("Experiment name '%s' contains illegal character '%s'", *inputData.ExperimentName, char))
+			valid = false
 		}
-		valid = false
 	}
 	return valid
 }

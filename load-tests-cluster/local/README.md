@@ -58,6 +58,26 @@ Endpoints (all on `127.0.0.1`; set the `LOCAL_*_PORT` variables to change them):
 | Rosetta (`ARCHIVE=1`) | 3087 |
 | Archive Postgres (`ARCHIVE=1`; user `postgres`, password `local`, database `archive`) | 55434 |
 
+## Daemons with ITN harness support
+
+With `ITN_HARNESS=1`, the orchestrator uses the ITN harness operations of
+MinaProtocol/mina#19616: it funds keys with `createAccounts` on the seed (no
+`mina` client runs) and journals its scheduling handles in
+`/tmp/orchestrator-handles.jsonl` in its container. A failed or cancelled run
+then stops every scheduler its nodes list. It needs a `MINA_IMAGE` with that
+daemon, for example one built from a local binary:
+
+```sh
+# Dockerfile: FROM minaprotocol/mina-daemon:<tag>-focal-devnet
+#             COPY mina /usr/local/bin/mina
+#             ENV MINA_PROFILE=devnet
+docker build -t mina-daemon:itn-harness-local <dir>
+make up smoke TOPOLOGY=minimal MINA_IMAGE=mina-daemon:itn-harness-local ITN_HARNESS=1
+```
+
+`make images` pulls an image only when it is missing, so a local `MINA_IMAGE`
+works.
+
 ## The network
 
 `TOPOLOGY` selects the nodes. Give the same value to every `make` command

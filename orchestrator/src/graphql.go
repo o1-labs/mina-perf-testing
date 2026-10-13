@@ -36,6 +36,14 @@ func NewGqlClient(config Config, addr NodeAddress) (*NodeEntry, error) {
 	}
 	entry := &NodeEntry{Client: client}
 	entry.setAuth(auth)
+	// A daemon without the harness operations answers commitId with a
+	// GraphQL error; the old paths are then used for this node.
+	if commit, err := client.CommitID(config.Ctx); err == nil {
+		entry.HarnessSupport = true
+		entry.CommitID = commit
+	} else {
+		config.Log.Infof("node %s has no ITN harness support (%v); using the old scheduling paths", addr, err)
+	}
 	return entry, nil
 }
 
@@ -136,6 +144,11 @@ func wrapGqlRequest[T any](config Config, nodeAddress NodeAddress, perform func(
 
 func SchedulePaymentsGql(config Config, nodeAddress NodeAddress, input PaymentsDetails) (string, error) {
 	handle, err := wrapGqlRequest(config, nodeAddress, func(client *itn.Client) (string, error) {
+		if handle, ok := config.writeAheadHandle(nodeAddress, "payments"); ok {
+			return withHandleRetry(func() (string, error) {
+				return client.SchedulePaymentsWithHandle(config.Ctx, input.toItn(), handle)
+			})
+		}
 		return client.SchedulePayments(config.Ctx, input.toItn())
 	})
 	if err != nil {
@@ -156,6 +169,11 @@ func StopTransactionsGql(config Config, nodeAddress NodeAddress, handle string) 
 
 func ScheduleZkappCommands(config Config, nodeAddress NodeAddress, input ZkappCommandsDetails) (string, error) {
 	handle, err := wrapGqlRequest(config, nodeAddress, func(client *itn.Client) (string, error) {
+		if handle, ok := config.writeAheadHandle(nodeAddress, "zkapps"); ok {
+			return withHandleRetry(func() (string, error) {
+				return client.ScheduleZkappCommandsWithHandle(config.Ctx, input.toItn(), handle)
+			})
+		}
 		return client.ScheduleZkappCommands(config.Ctx, input.toItn())
 	})
 	if err != nil {

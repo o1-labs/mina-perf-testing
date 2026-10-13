@@ -43,8 +43,20 @@ func simpleRangeCheck(value float64, name string) ValidationStep {
 	}
 }
 
+// MaxExperimentNameLen leaves room in a 32-character memo
+// (Signed_command_memo) for "-<round>" and "-<batch>" with up to two digits
+// each: every payment and zkApp carries "<name>-<round>-<batch>" as its memo
+// prefix. The daemon refuses a longer memo only when the payments step
+// schedules it, after funding, so the name is refused here instead.
+const MaxExperimentNameLen = 32 - len("-99-99")
+
 func ValidationSteps(p *GenParams) []ValidationStep {
 	return []ValidationStep{
+		{
+			ErrorMsg: fmt.Sprintf("experiment name must be at most %d characters, so that memos (\"<name>-<round>-<batch>\") fit in 32", MaxExperimentNameLen),
+			Check:    func(p *GenParams) bool { return len(p.ExperimentName) > MaxExperimentNameLen },
+			ExitCode: 1,
+		},
 		simpleRangeCheck(p.SenderRatio, "sender ratio"),
 		simpleRangeCheck(p.ZkappRatio, "zkapp ratio"),
 		simpleRangeCheck(p.MinStopRatio, "min stop ratio"),

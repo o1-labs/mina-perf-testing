@@ -1,6 +1,7 @@
 package itn_orchestrator
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -140,3 +141,59 @@ func (KeyloaderAction) Run(config Config, rawParams json.RawMessage, output Outp
 }
 
 var _ Action = KeyloaderAction{}
+
+// Argon2i cost of the key files EncodePrivateKey writes: the daemon's
+// defaults (128 MiB, 6 passes), as `mina advanced itn-create-accounts`
+// writes them.
+const (
+	keyfileArgonMem = 134217728
+	keyfileArgonOps = 6
+)
+
+// EncodePrivateKey encrypts a private key (the bytes inside its base58
+// encoding) into a key file in the daemon's format, which DecodePrivateKey
+// and the mina CLI read.
+func EncodePrivateKey(sk []byte, password []byte) ([]byte, error) {
+	var nonce [24]byte
+	// libsodium's crypto_pwhash salt is 16 bytes; the daemon rejects other sizes.
+	salt := make([]byte, 16)
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return nil, err
+	}
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	k := argon2.Key(password, salt, keyfileArgonOps, keyfileArgonMem/1024, 1, 32)
+	var key [32]byte
+	copy(key[:], k)
+	ciphertext := secretbox.Seal(nil, sk, &nonce, &key)
+	encode := func(bs []byte) string { return base58.CheckEncode(bs, '\x02') }
+	return json.Marshal(map[string]any{
+		"box_primitive": "xsalsa20poly1305",
+		"pw_primitive":  "argon2i",
+		"nonce":         encode(nonce[:]),
+		"pwsalt":        encode(salt),
+		"pwdiff":        []uint32{keyfileArgonMem, keyfileArgonOps},
+		"ciphertext":    encode(ciphertext),
+	})
+}
+
+// WritePrivateKeyFile writes a base58 private key (EK...) to fname as an
+// encrypted key file, and its public key to fname.pub, as the mina CLI does.
+func WritePrivateKeyFile(fname string, privateKey string, publicKey string, password []byte) error {
+	sk, version, err := base58.CheckDecode(privateKey)
+	if err != nil {
+		return fmt.Errorf("decoding private key: %w", err)
+	}
+	if version != '\x5A' {
+		return errors.New("not a Mina private key (wrong version byte)")
+	}
+	box, err := EncodePrivateKey(sk, password)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(fname, box, 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(fname+".pub", []byte(publicKey+"\n"), 0o644)
+}

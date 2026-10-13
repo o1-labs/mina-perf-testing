@@ -113,6 +113,14 @@ cmd_genesis() {
       fundDaemonPorts: ["seed:8301"],
       minaExec: "mina",
       logLevel: "info" }' >"$OUT/orchestrator-config.json"
+  # With ITN_HARNESS=1 the daemons have the ITN harness operations: fund keys
+  # through ITN createAccounts on the seed (no mina client involved) and
+  # journal the scheduling handles.
+  if [ "${ITN_HARNESS:-0}" = 1 ]; then
+    jq '. + { FundItnNodes: ["seed:3086"], HandleJournal: "/tmp/orchestrator-handles.jsonl" }' \
+      "$OUT/orchestrator-config.json" >"$OUT/orchestrator-config.json.tmp"
+    mv "$OUT/orchestrator-config.json.tmp" "$OUT/orchestrator-config.json"
+  fi
   chmod 600 "$OUT/orchestrator-config.json"
 
   local wl=()

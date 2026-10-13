@@ -2,6 +2,8 @@ package itn_orchestrator
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -60,5 +62,22 @@ func TestValidationRejectsInvertedStopRatios(t *testing.T) {
 	errs := ValidateAndCollectErrors(&p)
 	if !strings.Contains(strings.Join(errs, "; "), "must not exceed max stop ratio") {
 		t.Fatalf("inverted stop-ratio pair not rejected: %v", errs)
+	}
+}
+
+func TestExperimentNameLength(t *testing.T) {
+	p := DefaultGenParams()
+	key := filepath.Join(t.TempDir(), "whale")
+	if err := os.WriteFile(key, []byte("k"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p.Privkeys = []string{key}                         // the defaults fail the funding-key check otherwise
+	p.ExperimentName = "local-baseline-be3795e-7nodes" // 29 characters: memos overflow
+	if errs := ValidateAndCollectErrors(&p); len(errs) != 1 {
+		t.Fatalf("want one error for a %d-character name, got %v", len(p.ExperimentName), errs)
+	}
+	p.ExperimentName = "b-1215049-5n"
+	if errs := ValidateAndCollectErrors(&p); len(errs) != 0 {
+		t.Fatalf("unexpected errors for a short name: %v", errs)
 	}
 }
