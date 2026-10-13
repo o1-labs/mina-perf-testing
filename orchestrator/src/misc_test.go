@@ -1,6 +1,12 @@
 package itn_orchestrator
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+)
 
 func TestParseMina(t *testing.T) {
 	if _, err := parseMina("12.1234567890"); err == nil {
@@ -26,5 +32,26 @@ func TestParseMina(t *testing.T) {
 	}
 	if v, err := parseMina("123"); err != nil || v != 123e9 {
 		t.Fatal("no dot not parsed")
+	}
+}
+
+// A wait step ends when the experiment context is cancelled, not when the
+// wait is over.
+func TestWaitEndsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	start := time.Now()
+	err := WaitAction{}.Run(Config{Ctx: ctx}, json.RawMessage(`{"min": 10}`), nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("the wait ended %s after the cancel", time.Since(start))
+	}
+	if err := (WaitAction{}).Run(Config{Ctx: context.Background()}, json.RawMessage(`{"sec": 0}`), nil); err != nil {
+		t.Fatalf("a zero wait returned %v", err)
 	}
 }
