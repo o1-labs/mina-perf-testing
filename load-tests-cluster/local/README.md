@@ -10,7 +10,8 @@ experiment end to end without a cluster.
 - Docker with Compose v2, and GNU make. The host needs nothing else: the
   scripts run inside the Mina image.
 - Free memory: about 14 GB for the full topology (5 daemons at up to about
-  2.7 GB each during an experiment), about 6 GB for the minimal one.
+  2.7 GB each during an experiment), about 6 GB for the minimal one, and
+  about 2.7 GB more for each plain node above 2 (`PLAIN_NODES`).
 - The `internal-trace-consumer` submodule: `log-fetcher` and `log-api` are
   built from it (`git submodule update --init internal-trace-consumer`). The
   first build takes about 7 minutes.
@@ -89,7 +90,16 @@ read it too.
 | `seed` | libp2p seed and the only snark worker | seed, snark worker and the only block producer (with the whale's stake) |
 | `bp-1`, `bp-2` | block producers; `bp-1` also has the whale's stake | not started |
 | `plain-1` | node without a role, which receives load | node without a role, which receives load |
-| `plain-2` | node without a role, which receives load | not started |
+| `plain-2`, ... | nodes without a role, which receive load; `PLAIN_NODES` (default 2) sets how many | not started |
+
+`PLAIN_NODES=N` runs N plain nodes in the full topology, for example
+`make up smoke PLAIN_NODES=5` for 8 daemons. Give it to every `make` command,
+as with `TOPOLOGY`. `plain-3` and up are copies of `plain-2` under their own
+names, which `scripts/local-env.sh genesis` writes to
+`generated/plain-nodes.yaml` (a second compose file, empty for 2 or fewer).
+They start in the last wave, with `plain-1` and `plain-2`. Keys exist for
+every plain node that a `make keys` has seen, so a larger `PLAIN_NODES` makes
+the missing ones on the next `make up`.
 
 The minimal topology is for small machines and CI: the workflow
 `.github/workflows/local-env.yml` runs `make up smoke TOPOLOGY=minimal` on
@@ -198,4 +208,4 @@ Details that the compose file handles:
 | `scripts/smoke.sh` | `status` and `run` for `make status` and `make smoke` |
 | `scripts/archive-entrypoint.sh` | archive schema on an empty database, then `mina-archive run` |
 | `initdb/000-init.sh` | applies `../init-sql`, then records the local deployment |
-| `generated/` | keys and configs (git-ignored; `make clean` deletes it) |
+| `generated/` | keys, configs and `plain-nodes.yaml` (git-ignored; `make clean` deletes it) |
