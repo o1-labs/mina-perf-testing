@@ -33,13 +33,25 @@ func (WaitAction) Run(config Config, rawParams json.RawMessage, output OutputF) 
 	if params.Slot > 0 {
 		at := config.GenesisTimestamp.Add(time.Millisecond*time.Duration(config.SlotDurationMs)*time.Duration(params.Slot) + delay)
 		delay = time.Until(at)
-		if delay > 0 {
-			time.Sleep(delay)
-		}
-	} else {
-		time.Sleep(delay)
 	}
-	return nil
+	return sleepCtx(config.Ctx, delay)
+}
+
+// sleepCtx waits for d, or until ctx ends, and then returns ctx's error. A
+// plain time.Sleep made a cancel during a wait step -- the last step of each
+// round, up to RoundDurationMin long -- take effect only when the wait ended.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 func (WaitAction) Name() string { return "wait" }
