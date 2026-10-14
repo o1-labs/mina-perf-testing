@@ -59,6 +59,11 @@ Endpoints (all on `127.0.0.1`; set the `LOCAL_*_PORT` variables to change them):
 | Rosetta (`ARCHIVE=1`) | 3087 |
 | Archive Postgres (`ARCHIVE=1`; user `postgres`, password `local`, database `archive`) | 55434 |
 
+The orchestrator's `POST` endpoints need basic auth. The local user is
+`local` with the password `LOCAL_WRITE_PASS` (default `local`), from the
+generated `keys/write-auth.htpasswd`; `make smoke` sends it, and so must a
+manual call: `curl -u local:local -X POST localhost:9090/api/v0/experiment/cancel`.
+
 ## Daemons with ITN harness support
 
 With `ITN_HARNESS=1`, the orchestrator uses the ITN harness operations of

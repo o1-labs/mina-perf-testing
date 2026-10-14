@@ -115,6 +115,10 @@ services:
     environment:
       PSQL_CONNECTION_STRING: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       CONFIG: /app/config.json
+      # The POST endpoints need basic auth: an htpasswd file (see .env.example).
+      # Without it the service does not start.
+      WRITE_AUTH_USERS_FILE: ${WRITE_AUTH_USERS_FILE:-}
+      ALLOW_UNAUTHENTICATED_WRITES: ${ALLOW_UNAUTHENTICATED_WRITES:-}
 
 volumes:
   postgres_data:

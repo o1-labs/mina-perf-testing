@@ -28,6 +28,7 @@ import (
 // App holds application-wide dependencies
 type App struct {
 	Router          *mux.Router
+	WriteAuth       *writeAuth
 	Store           *service.Store
 	Config          *lib.OrchestratorConfig
 	WebhookNotifier *WebhookNotifier
@@ -52,11 +53,12 @@ func (a *App) initializeRoutes() {
 		Store: a.Store,
 	}
 
-	// Register routes with new handlers
-	a.Router.Handle("/api/v0/experiment/run", createHandler).Methods(http.MethodPost)
-	a.Router.Handle("/api/v0/experiment/test", infoHandler).Methods(http.MethodPost)
+	// Writes need basic auth; the status read stays open because the
+	// dashboard reads it from the browser.
+	a.Router.Handle("/api/v0/experiment/run", a.protect(createHandler)).Methods(http.MethodPost)
+	a.Router.Handle("/api/v0/experiment/test", a.protect(infoHandler)).Methods(http.MethodPost)
 	a.Router.Handle("/api/v0/experiment/status", statusHandler).Methods(http.MethodGet)
-	a.Router.Handle("/api/v0/experiment/cancel", cancelHandler).Methods(http.MethodPost)
+	a.Router.Handle("/api/v0/experiment/cancel", a.protect(cancelHandler)).Methods(http.MethodPost)
 }
 
 // allowPrivateWebhooks mirrors the -allow-private-webhooks flag. It is a
@@ -446,6 +448,12 @@ func main() {
 	address := flag.String("address", ":8080", "Address to run the server on")
 	flag.BoolVar(&allowPrivateWebhooks, "allow-private-webhooks", false,
 		"permit webhook destinations on private (RFC1918/RFC4193) addresses; loopback and link-local stay refused")
+	// The flags fall back to environment variables because the container
+	// entrypoint fixes the command line.
+	writeAuthUsers := flag.String("write-auth-users", os.Getenv("WRITE_AUTH_USERS_FILE"),
+		"htpasswd file (bcrypt, apr1 or SHA lines) with the users allowed to POST; also WRITE_AUTH_USERS_FILE")
+	allowUnauthenticatedWrites := flag.Bool("allow-unauthenticated-writes", os.Getenv("ALLOW_UNAUTHENTICATED_WRITES") == "1",
+		"serve the POST endpoints without authentication (for a private network only); also ALLOW_UNAUTHENTICATED_WRITES=1")
 
 	flag.Parse()
 
@@ -465,6 +473,19 @@ func main() {
 	})
 
 	app := &App{}
+	switch {
+	case *writeAuthUsers != "":
+		auth, err := newWriteAuth(*writeAuthUsers)
+		if err != nil {
+			log.Fatalf("Cannot read the write-auth users: %v", err)
+		}
+		app.WriteAuth = auth
+		log.Printf("POST endpoints need basic auth (users file %s)", *writeAuthUsers)
+	case *allowUnauthenticatedWrites:
+		log.Printf("WARNING: POST endpoints serve WITHOUT authentication (-allow-unauthenticated-writes); anyone who reaches this service can start or cancel experiments")
+	default:
+		log.Fatalf("No write-auth users file: give -write-auth-users (or WRITE_AUTH_USERS_FILE), or -allow-unauthenticated-writes to serve the POST endpoints without authentication")
+	}
 	app.Initialize(*connStr, config)
 	sqlDB, err := app.Store.DB.DB()
 	if err != nil {

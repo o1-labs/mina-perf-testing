@@ -233,11 +233,26 @@ in config.json **and** set `"logLevel":"debug"` or lower
 
 The Orchestrator can be run as a service, exposing a set of HTTP endpoints to manage experiments. Below are the available endpoints:
 
+### Authentication
+
+The `POST` endpoints (`run`, `test`, `cancel`) need HTTP basic auth. The users
+come from an htpasswd file given with `-write-auth-users <file>` or the
+`WRITE_AUTH_USERS_FILE` environment variable; bcrypt (`htpasswd -B`), apr1
+(`openssl passwd -apr1`) and SHA lines are accepted, the same formats as the
+Traefik basic-auth middleware, so one secret can serve both. The file is read
+again when it changes, so rotating it needs no restart. `GET status` stays
+open.
+
+The service refuses to start without a users file. For a private network
+only, `-allow-unauthenticated-writes` (or `ALLOW_UNAUTHENTICATED_WRITES=1`)
+serves the `POST` endpoints open, and the service logs a warning at startup.
+
 ### 1. Run Experiment
 Starts a new experiment with the provided setup.
 
 ```bash
 curl --location 'http://{host}:9090/api/v0/experiment/run' \
+--user 'n8n:secret' \
 --header 'Content-Type: application/json' \
 --data '{
   "priv_keys":["/keys/plain1"],
@@ -271,7 +286,7 @@ curl --location 'http://host:9090/api/v0/experiment/status'
 Stops the currently running experiment.
 
 ```bash
-curl --location --request POST 'http://hosts:9090/api/v0/experiment/cancel'
+curl --location --request POST --user 'n8n:secret' 'http://hosts:9090/api/v0/experiment/cancel'
 ```
 
 ### 4. Test Experiment Setup
@@ -279,6 +294,7 @@ Tests the experiment setup without actually running it.
 
 ```bash
 curl --location 'http://localhost:9090/api/v0/experiment/test' \
+--user 'n8n:secret' \
 --header 'Content-Type: application/json' \
 --data '{
   "priv_keys":["plain1"],

@@ -56,6 +56,12 @@ cmd_keys() {
   for n in $ALL_NODES whale; do mina_keypair "$n"; done
   itn_keypair orchestrator_sk
   itn_keypair fetcher_sk
+  # The orchestrator service's POST endpoints need basic auth: one user,
+  # `local`, in an htpasswd file (apr1, the format Traefik also accepts).
+  if [ ! -f "$KEYS/write-auth.htpasswd" ]; then
+    printf 'local:%s\n' "$(openssl passwd -apr1 "${LOCAL_WRITE_PASS:-local}")" >"$KEYS/write-auth.htpasswd"
+    chmod 600 "$KEYS/write-auth.htpasswd"
+  fi
   if [ ! -f "$KEYS/seed-libp2p" ]; then
     # The seed has a fixed libp2p identity so the other nodes can name it
     # in --peer. mkdtemp needs a writable working directory.
@@ -166,6 +172,7 @@ LOCAL_TOPOLOGY=$TOPOLOGY
 LOCAL_NODES="$nodes"
 LOCAL_PLAIN_NODES=$PLAIN_NODES
 SEED_BLOCK_PRODUCER=$seed_bp
+LOCAL_WRITE_AUTH=local:${LOCAL_WRITE_PASS:-local}
 ARCHIVE_ADDRESS=$([ "$ARCHIVE" = 1 ] && echo archive:3086)
 EOF
   echo "genesis at $ts, topology $TOPOLOGY: $nodes, archive: $ARCHIVE"
