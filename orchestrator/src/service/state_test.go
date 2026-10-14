@@ -365,3 +365,90 @@ func TestAppendErrorFDoesNotSetATerminalState(t *testing.T) {
 		t.Errorf("Add during wind-down returned %v, want ErrExperimentRunning", err)
 	}
 }
+
+// The hook receives the runs that were closed out, and only then.
+func TestInterruptedRunHookReceivesTheClosedRuns(t *testing.T) {
+	db := testDB(t)
+	db.Exec(`DROP TABLE IF EXISTS experiment_state`)
+	if err := db.AutoMigrate(&ExperimentState{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := db.Exec(`INSERT INTO experiment_state (name, status, created_at, updated_at) VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+		"lost-run", string(Running), now, now, "done-run", string(Ended), now, now).Error; err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	var hookStore *Store
+	s, err := NewStore(db, WithInterruptedRunHook(func(st *Store, names []string) { hookStore, got = st, names }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if len(got) != 1 || got[0] != "lost-run" {
+		t.Fatalf("hook got %v, want [lost-run]", got)
+	}
+	if hookStore != s {
+		t.Error("hook did not receive the store it was registered on")
+	}
+
+	if err := s.AppendWarning(got, "stopped 2 schedulers"); err != nil {
+		t.Fatal(err)
+	}
+	var warnings []string
+	if err := db.Raw(`SELECT unnest(warnings) FROM experiment_state WHERE name = ?`, "lost-run").Scan(&warnings).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 1 || warnings[0] != "stopped 2 schedulers" {
+		t.Errorf("warnings %v", warnings)
+	}
+}
+
+// The hook stays quiet when nothing was interrupted.
+func TestInterruptedRunHookIsQuietWithNothingToClose(t *testing.T) {
+	db := testDB(t)
+	db.Exec(`DROP TABLE IF EXISTS experiment_state`)
+	called := false
+	s, err := NewStore(db, WithInterruptedRunHook(func(*Store, []string) { called = true }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if called {
+		t.Error("hook ran with no interrupted run")
+	}
+}
+
+// While orphaned load is being stopped no run may start, or its own
+// schedulers would be stopped with the orphans; and the cleanup yields to a
+// run that already holds the slot.
+func TestCleanupAndTheRunSlotExcludeEachOther(t *testing.T) {
+	db := testDB(t)
+	db.Exec(`DROP TABLE IF EXISTS experiment_state`)
+	s, err := NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if !s.BeginCleanup() {
+		t.Fatal("cleanup refused on an idle store")
+	}
+	if s.BeginCleanup() {
+		t.Fatal("a second cleanup was admitted during the first")
+	}
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = s.Add(&ExperimentState{Name: "during-cleanup", Status: Running, CreatedAt: time.Now()}, cancel)
+	if !errors.Is(err, ErrLoadCleanup) {
+		t.Fatalf("Add during cleanup: %v, want ErrLoadCleanup", err)
+	}
+	s.EndCleanup()
+
+	if err := s.Add(&ExperimentState{Name: "after-cleanup", Status: Running, CreatedAt: time.Now()}, cancel); err != nil {
+		t.Fatalf("Add after cleanup: %v", err)
+	}
+	if s.BeginCleanup() {
+		t.Error("cleanup was admitted while a run holds the slot")
+	}
+}

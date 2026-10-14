@@ -76,6 +76,23 @@ type Store struct {
 	lockConn *sql.Conn
 	// stopLock ends the supervisor goroutine.
 	stopLock context.CancelFunc
+	// onInterrupted runs after reconcileInterruptedExperiments closed out
+	// runs; see WithInterruptedRunHook.
+	onInterrupted func(*Store, []string)
+	// cleanup is set while the load of an interrupted run is being stopped;
+	// Add refuses the slot meanwhile (see BeginCleanup).
+	cleanup bool
+}
+
+// StoreOption configures NewStore.
+type StoreOption func(*Store)
+
+// WithInterruptedRunHook runs hook with the names of the experiments that
+// reconcileInterruptedExperiments closed out, each time it closes out at
+// least one. The first call can happen inside NewStore, which is why the
+// hook receives the store as an argument.
+func WithInterruptedRunHook(hook func(*Store, []string)) StoreOption {
+	return func(s *Store) { s.onInterrupted = hook }
 }
 
 // orchestratorLockID is the key for the advisory lock that admits one
@@ -114,7 +131,7 @@ const lockQueryTimeout = 10 * time.Second
 // look healthy, and the first POST /run would fail with
 // `relation "experiment_state" does not exist` after Store.Add had already
 // taken the in-process slot. Failing at boot is the honest outcome.
-func NewStore(db *gorm.DB) (*Store, error) {
+func NewStore(db *gorm.DB, opts ...StoreOption) (*Store, error) {
 	log.Printf("Starting auto-migration for ExperimentState table...")
 	if err := db.AutoMigrate(&ExperimentState{}); err != nil {
 		return nil, fmt.Errorf("auto-migrating ExperimentState table: %w", err)
@@ -122,6 +139,9 @@ func NewStore(db *gorm.DB) (*Store, error) {
 	log.Printf("Auto-migration completed successfully")
 	store := &Store{
 		DB: db,
+	}
+	for _, opt := range opts {
+		opt(store)
 	}
 
 	// Reconcile only while holding the single-orchestrator lock. Without it,
@@ -348,7 +368,52 @@ func (s *Store) reconcileInterruptedExperiments() {
 	if len(names) > 0 {
 		log.Printf("Closed out %d experiment(s) left in progress when the orchestrator last stopped: %s",
 			len(names), strings.Join(names, ", "))
+		if s.onInterrupted != nil {
+			s.onInterrupted(s, names)
+		}
 	}
+}
+
+// AppendWarning adds note to the warnings of the named experiments. It is
+// used for runs this process did not drive, so it writes the rows directly
+// rather than through the in-memory state.
+func (s *Store) AppendWarning(names []string, note string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+	defer cancel()
+	return s.DB.WithContext(ctx).Exec(`
+		UPDATE experiment_state
+		SET warnings = array_append(coalesce(warnings, ARRAY[]::text[]), ?),
+		    updated_at = now()
+		WHERE name = ANY(?)`, note, pq.StringArray(names)).Error
+}
+
+// ErrLoadCleanup is returned by Add while the load left by an interrupted
+// run is being stopped. A run started during that window would have its
+// own schedulers stopped with the orphaned ones.
+var ErrLoadCleanup = errors.New("the load left by an interrupted run is being stopped; retry shortly")
+
+// BeginCleanup claims the experiment slot for stopping orphaned load. It
+// reports false, and claims nothing, while a run holds the slot: the end of
+// that run stops every scheduler on its nodes anyway. The caller must call
+// EndCleanup when it reported true.
+func (s *Store) BeginCleanup() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.holdsSlot() || s.cleanup {
+		return false
+	}
+	s.cleanup = true
+	return true
+}
+
+// EndCleanup releases the slot claimed by BeginCleanup.
+func (s *Store) EndCleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanup = false
 }
 
 func (a *Store) NameIsUnique(name string) bool {
@@ -518,6 +583,9 @@ func (s *Store) holdsSlot() bool {
 func (s *Store) Add(experiment *ExperimentState, cancel context.CancelFunc) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.cleanup {
+		return ErrLoadCleanup
+	}
 	if s.holdsSlot() {
 		return fmt.Errorf("%w: %q, started %s ago, at step %d (%s)",
 			ErrExperimentRunning, s.experiment.Name,
