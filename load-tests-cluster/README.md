@@ -135,6 +135,7 @@ curl --location 'http://localhost:3003/api/deployments' \
 Run an experiment:
 ```bash
 curl --location 'http://localhost:9090/api/v0/experiment/run' \
+--user 'user:password' \
 --header 'Content-Type: application/json' \
 --data '{
   "priv_keys": ["/keys/plain1"],
