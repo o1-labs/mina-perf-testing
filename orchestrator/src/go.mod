@@ -1,6 +1,6 @@
 module itn_orchestrator
 
-go 1.24.0
+go 1.23
 
 require (
 	github.com/MinaProtocol/mina-sdk-go v0.4.0-rc.1
@@ -9,16 +9,14 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.40.1
 	github.com/btcsuite/btcutil v1.0.2
 	github.com/ipfs/go-log/v2 v2.1.3
-	github.com/stretchr/testify v1.10.0
-	github.com/tg123/go-htpasswd v1.2.5
+	github.com/stretchr/testify v1.8.1
 	go.uber.org/zap v1.16.0
-	golang.org/x/crypto v0.45.0
+	golang.org/x/crypto v0.22.0
 	gorm.io/gorm v1.25.11
 	itn_json_types v0.0.0
 )
 
 require (
-	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20231201235250-de7065d80cb9 // indirect
@@ -27,8 +25,8 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
-	golang.org/x/sync v0.18.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/sync v0.8.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
@@ -55,7 +53,8 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/sys v0.26.0 // indirect
+	golang.org/x/tools v0.26.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/driver/postgres v1.5.11
 	honnef.co/go/tools v0.0.1-2020.1.4 // indirect

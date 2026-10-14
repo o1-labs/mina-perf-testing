@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,39 @@ func post(h http.Handler, user, password string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
+}
+
+func TestHtpasswdFormats(t *testing.T) {
+	// Lines as the tools write them: htpasswd -B, openssl passwd -apr1 (two
+	// salts, passwords "local" and a 20-byte one to cover the length loops),
+	// htpasswd -s ({SHA}); a plain and a crypt(3) line are refused.
+	users, err := parseHtpasswd(strings.NewReader(
+		bcryptLine(t, "b", "pw")+
+			"a1:$apr1$Yx1rZ0Jt$heeQusHw02RI4rlW2Wh.F/\n"+
+			"a2:$apr1$Q4bjcSVN$u43MTYScDTx9Ps2Nrk0Wm/\n"+
+			"s:{SHA}W6ph5Mm5Pz8GgiULbPgzG37mj9g=\n"+
+			"plain:password\n"+
+			"crypt:abJnggxhB/yWI\n"), func(int, error) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 4 {
+		t.Fatalf("%d users parsed, want 4 (plain and crypt refused): %v", len(users), users)
+	}
+	for _, c := range []struct {
+		user, password string
+		want           bool
+	}{
+		{"b", "pw", true}, {"b", "pW", false},
+		{"a1", "local", true}, {"a1", "locaL", false},
+		{"a2", "twenty-byte-password", true}, {"a2", "twenty-byte-passwore", false},
+		{"s", "password", true}, {"s", "Password", false},
+		{"plain", "password", false}, {"crypt", "password", false}, {"nobody", "pw", false},
+	} {
+		if got := users.Match(c.user, c.password); got != c.want {
+			t.Errorf("%s/%q: %v, want %v", c.user, c.password, got, c.want)
+		}
+	}
 }
 
 func TestWriteAuthAdmitsOnlyListedUsers(t *testing.T) {

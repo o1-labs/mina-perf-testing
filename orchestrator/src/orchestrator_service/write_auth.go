@@ -6,8 +6,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"github.com/tg123/go-htpasswd"
 )
 
 // writeAuth checks HTTP basic auth on the write endpoints against an htpasswd
@@ -23,7 +21,7 @@ import (
 type writeAuth struct {
 	path    string
 	mu      sync.Mutex
-	users   *htpasswd.File
+	users   htpasswdUsers
 	modTime time.Time
 }
 
@@ -45,8 +43,13 @@ func (w *writeAuth) reload() error {
 	if w.users != nil && st.ModTime().Equal(w.modTime) {
 		return nil
 	}
-	users, err := htpasswd.New(w.path, htpasswd.DefaultSystems, func(err error) {
-		stdoutLog.Printf("write-auth users file %s: skipping a line: %v", w.path, err)
+	f, err := os.Open(w.path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	users, err := parseHtpasswd(f, func(line int, err error) {
+		stdoutLog.Printf("write-auth users file %s line %d skipped: %v", w.path, line, err)
 	})
 	if err != nil {
 		return fmt.Errorf("reading the write-auth users file %s: %w", w.path, err)
