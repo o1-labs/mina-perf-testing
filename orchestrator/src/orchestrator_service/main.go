@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 // App holds application-wide dependencies
 type App struct {
 	Router          *mux.Router
+	WriteAuth       *writeAuth
 	Store           *service.Store
 	Config          *lib.OrchestratorConfig
 	WebhookNotifier *WebhookNotifier
@@ -51,11 +53,12 @@ func (a *App) initializeRoutes() {
 		Store: a.Store,
 	}
 
-	// Register routes with new handlers
-	a.Router.Handle("/api/v0/experiment/run", createHandler).Methods(http.MethodPost)
-	a.Router.Handle("/api/v0/experiment/test", infoHandler).Methods(http.MethodPost)
+	// Writes need basic auth; the status read stays open because the
+	// dashboard reads it from the browser.
+	a.Router.Handle("/api/v0/experiment/run", a.protect(createHandler)).Methods(http.MethodPost)
+	a.Router.Handle("/api/v0/experiment/test", a.protect(infoHandler)).Methods(http.MethodPost)
 	a.Router.Handle("/api/v0/experiment/status", statusHandler).Methods(http.MethodGet)
-	a.Router.Handle("/api/v0/experiment/cancel", cancelHandler).Methods(http.MethodPost)
+	a.Router.Handle("/api/v0/experiment/cancel", a.protect(cancelHandler)).Methods(http.MethodPost)
 }
 
 // allowPrivateWebhooks mirrors the -allow-private-webhooks flag. It is a
@@ -79,12 +82,12 @@ func (a *App) Initialize(connStr string, config lib.OrchestratorConfig) {
 		log.Fatalf("Cannot connect to DB: %v", err)
 	}
 	a.Router = mux.NewRouter()
-	store, err := service.NewStore(db)
+	a.Config = &config
+	store, err := service.NewStore(db, service.WithInterruptedRunHook(a.onInterruptedRuns))
 	if err != nil {
 		log.Fatalf("Cannot initialise experiment store: %v", err)
 	}
 	a.Store = store
-	a.Config = &config
 	a.WebhookNotifier = NewWebhookNotifier(logging.Logger("webhook"))
 	a.WebhookNotifier.allowPrivate = allowPrivateWebhooks
 	a.initializeRoutes()
@@ -288,6 +291,58 @@ func (a *App) stopLeftoverLoad(config lib.Config, log logging.StandardLogger) {
 	}
 }
 
+// onInterruptedRuns runs when the store closed out runs that a previous
+// process was driving. Their handles died with that process, but the
+// daemons keep generating the load, so it is stopped here without them.
+//
+// It runs in the background: the first call happens inside NewStore, before
+// the server binds, and the stop can take minutes when a node is slow or the
+// uptime data is unavailable. The experiment slot is claimed meanwhile
+// (BeginCleanup), so a run cannot start while schedulers are being stopped
+// and lose its own.
+func (a *App) onInterruptedRuns(store *service.Store, names []string) {
+	go a.stopOrphanedLoad(store, names)
+}
+
+func (a *App) stopOrphanedLoad(store *service.Store, names []string) {
+	if !store.BeginCleanup() {
+		stdoutLog.Printf("A run is in progress; the load left by %s is stopped when that run ends", strings.Join(names, ", "))
+		return
+	}
+	defer store.EndCleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), orphanedLoadTimeout)
+	defer cancel()
+	log := logging.Logger("orchestrator")
+	config := lib.SetupConfig(ctx, *a.Config, log)
+
+	var stopped []string
+	err := lib.StopOrphanedLoad(config, orphanedLoadDiscoveryTimeout, func(addr lib.NodeAddress, handle string) {
+		stopped = append(stopped, handle+" on "+string(addr))
+	})
+	note := fmt.Sprintf("Orchestrator restart: stopped %d scheduler(s) the run left on the nodes", len(stopped))
+	if len(stopped) > 0 {
+		note += ": " + strings.Join(stopped, ", ")
+	}
+	if err != nil {
+		note += "; errors: " + err.Error()
+		stdoutLog.Printf("Stopping the load left by %s: %v", strings.Join(names, ", "), err)
+	}
+	stdoutLog.Print(note)
+	if err := store.AppendWarning(names, note); err != nil {
+		stdoutLog.Printf("Recording the stopped load on %s: %v", strings.Join(names, ", "), err)
+	}
+}
+
+// orphanedLoadTimeout bounds one stop of orphaned load, and
+// orphanedLoadDiscoveryTimeout the uptime data read inside it (its reader
+// retries for up to five minutes on its own), so the stops keep time of
+// their own when the uptime service is down.
+const (
+	orphanedLoadTimeout          = 10 * time.Minute
+	orphanedLoadDiscoveryTimeout = 3 * time.Minute
+)
+
 // stdoutLog is the stdlib logger under a name the `log logging.StandardLogger`
 // parameters do not shadow.
 var stdoutLog = log.Default()
@@ -393,6 +448,12 @@ func main() {
 	address := flag.String("address", ":8080", "Address to run the server on")
 	flag.BoolVar(&allowPrivateWebhooks, "allow-private-webhooks", false,
 		"permit webhook destinations on private (RFC1918/RFC4193) addresses; loopback and link-local stay refused")
+	// The flags fall back to environment variables because the container
+	// entrypoint fixes the command line.
+	writeAuthUsers := flag.String("write-auth-users", os.Getenv("WRITE_AUTH_USERS_FILE"),
+		"htpasswd file (bcrypt, apr1 or SHA lines) with the users allowed to POST; also WRITE_AUTH_USERS_FILE")
+	allowUnauthenticatedWrites := flag.Bool("allow-unauthenticated-writes", os.Getenv("ALLOW_UNAUTHENTICATED_WRITES") == "1",
+		"serve the POST endpoints without authentication (for a private network only); also ALLOW_UNAUTHENTICATED_WRITES=1")
 
 	flag.Parse()
 
@@ -412,6 +473,19 @@ func main() {
 	})
 
 	app := &App{}
+	switch {
+	case *writeAuthUsers != "":
+		auth, err := newWriteAuth(*writeAuthUsers)
+		if err != nil {
+			log.Fatalf("Cannot read the write-auth users: %v", err)
+		}
+		app.WriteAuth = auth
+		log.Printf("POST endpoints need basic auth (users file %s)", *writeAuthUsers)
+	case *allowUnauthenticatedWrites:
+		log.Printf("WARNING: POST endpoints serve WITHOUT authentication (-allow-unauthenticated-writes); anyone who reaches this service can start or cancel experiments")
+	default:
+		log.Fatalf("No write-auth users file: give -write-auth-users (or WRITE_AUTH_USERS_FILE), or -allow-unauthenticated-writes to serve the POST endpoints without authentication")
+	}
 	app.Initialize(*connStr, config)
 	sqlDB, err := app.Store.DB.DB()
 	if err != nil {

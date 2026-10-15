@@ -89,6 +89,9 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 		if errors.Is(err, service.ErrExperimentRunning) {
 			return http.StatusConflict, []string{err.Error()}, nil
 		}
+		if errors.Is(err, service.ErrLoadCleanup) {
+			return http.StatusServiceUnavailable, []string{err.Error()}, nil
+		}
 		return http.StatusInternalServerError, []string{err.Error()}, nil
 	}
 

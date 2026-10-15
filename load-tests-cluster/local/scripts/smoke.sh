@@ -174,7 +174,8 @@ cmd_run() {
 
   echo "starting experiment $name"
   local resp
-  resp=$(curl -s -m 30 -w '\n%{http_code}' -H 'Content-Type: application/json' -d "$req" "$ORCH/run")
+  # Writes need basic auth (LOCAL_WRITE_AUTH from nodes.env).
+  resp=$(curl -s -m 30 -w '\n%{http_code}' -u "$LOCAL_WRITE_AUTH" -H 'Content-Type: application/json' -d "$req" "$ORCH/run")
   if [ "$(tail -n1 <<<"$resp")" != 200 ]; then
     echo "orchestrator refused the experiment: $(head -n -1 <<<"$resp")" >&2
     return 1

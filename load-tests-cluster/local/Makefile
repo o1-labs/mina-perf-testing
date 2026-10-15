@@ -2,6 +2,9 @@
 
 MINA_IMAGE ?= minaprotocol/mina-daemon:4.0.0-6965b50-jammy-devnet
 LOCAL_KEY_PASS ?= local
+# Password of the `local` user for the orchestrator's POST endpoints (basic
+# auth; the users file is generated/keys/write-auth.htpasswd).
+LOCAL_WRITE_PASS ?= local
 # full: seed, bp-1, bp-2 and PLAIN_NODES plain nodes (plain-1, plain-2, ...).
 # minimal: seed (also the block producer) and plain-1, for small machines
 # and CI.
@@ -15,7 +18,7 @@ ARCHIVE ?= 0
 # the orchestrator funds keys through ITN createAccounts on the seed and
 # journals its scheduling handles. Needs a MINA_IMAGE with that daemon.
 ITN_HARNESS ?= 0
-export MINA_IMAGE LOCAL_KEY_PASS
+export MINA_IMAGE LOCAL_KEY_PASS LOCAL_WRITE_PASS
 
 , := ,
 

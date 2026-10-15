@@ -136,6 +136,8 @@ services:
       CONFIG: /local/orchestrator-config.json
       MINA_PRIVKEY_PASS: ${LOCAL_KEY_PASS:-local}
       ITN_FEATURES: "1"
+      # POST endpoints need basic auth; local-env.sh keys writes this file.
+      WRITE_AUTH_USERS_FILE: /keys/write-auth.htpasswd
     volumes:
       - ./generated/orchestrator-config.json:/local/orchestrator-config.json:ro
       - ./generated/keys:/keys:ro
