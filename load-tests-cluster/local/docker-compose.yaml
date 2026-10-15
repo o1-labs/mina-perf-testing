@@ -126,6 +126,8 @@ services:
     build:
       context: ../../orchestrator
       dockerfile: Dockerfile-service
+      args:
+        ORCHESTRATOR_BUILD: ${ORCHESTRATOR_BUILD:-local}
     image: mina-perf-testing-local/orchestrator-service
     networks: [perf-local]
     depends_on:

@@ -18,7 +18,9 @@ ARCHIVE ?= 0
 # the orchestrator funds keys through ITN createAccounts on the seed and
 # journals its scheduling handles. Needs a MINA_IMAGE with that daemon.
 ITN_HARNESS ?= 0
-export MINA_IMAGE LOCAL_KEY_PASS LOCAL_WRITE_PASS
+# Recorded by the orchestrator service in every run (orchestrator_build).
+ORCHESTRATOR_BUILD ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo local)
+export MINA_IMAGE LOCAL_KEY_PASS LOCAL_WRITE_PASS ORCHESTRATOR_BUILD
 
 , := ,
 

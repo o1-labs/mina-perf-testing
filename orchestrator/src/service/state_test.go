@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	"github.com/lib/pq"
+
+	lib "itn_orchestrator"
 )
 
 func testDB(t *testing.T) *gorm.DB {
@@ -450,5 +455,70 @@ func TestCleanupAndTheRunSlotExcludeEachOther(t *testing.T) {
 	}
 	if s.BeginCleanup() {
 		t.Error("cleanup was admitted while a run holds the slot")
+	}
+}
+
+// The run record round-trips through the database: the fields set at
+// creation and the node set that follows discovery.
+func TestRunRecordIsPersisted(t *testing.T) {
+	db := testDB(t)
+	db.Exec(`DROP TABLE IF EXISTS experiment_state`)
+	db.Exec(`DROP FUNCTION IF EXISTS get_max_deployment_id()`)
+	s, err := NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if id := s.CurrentDeploymentID(context.Background()); id != nil {
+		t.Errorf("deployment id %d without the function, want nil", *id)
+	}
+	db.Exec(`CREATE FUNCTION get_max_deployment_id() RETURNS INT AS $$ SELECT 7 $$ LANGUAGE sql`)
+	defer db.Exec(`DROP FUNCTION IF EXISTS get_max_deployment_id()`)
+	id := s.CurrentDeploymentID(context.Background())
+	if id == nil || *id != 7 {
+		t.Fatalf("deployment id %v, want 7", id)
+	}
+
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Add(&ExperimentState{
+		Name: "recorded", Status: Running, CreatedAt: time.Now(),
+		RequestedBy: "n8n", DeploymentID: id, OrchestratorBuild: "abc1234", Script: `{"action":"wait"}`,
+	}, cancel); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []lib.RunNode{
+		{Address: "10.0.0.1:3086", PeerID: "p1", HarnessSupport: true, Build: "bbb"},
+		{Address: "10.0.0.2:3086", PeerID: "p2", BlockProducer: true, HarnessSupport: true, Build: "aaa"},
+	}
+	if !s.UpdateNodes(nodes) {
+		t.Fatal("the first node set did not count as a change")
+	}
+	if s.UpdateNodes(nodes) {
+		t.Fatal("the same node set counted as a change")
+	}
+
+	var row struct {
+		RequestedBy, OrchestratorBuild, Script string
+		DeploymentID                           int
+		Nodes                                  string
+		DaemonBuilds                           pq.StringArray `gorm:"type:text[]"`
+	}
+	if err := db.Raw(`SELECT requested_by, orchestrator_build, script, deployment_id, nodes_json::text AS nodes, daemon_builds
+		FROM experiment_state WHERE name = ?`, "recorded").Scan(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.RequestedBy != "n8n" || row.OrchestratorBuild != "abc1234" || row.Script != `{"action":"wait"}` || row.DeploymentID != 7 {
+		t.Errorf("row %+v", row)
+	}
+	var stored RunNodes
+	if err := stored.Scan(row.Nodes); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual([]lib.RunNode(stored), nodes) {
+		t.Errorf("nodes %+v, want %+v", stored, nodes)
+	}
+	if got := []string(row.DaemonBuilds); !reflect.DeepEqual(got, []string{"aaa", "bbb"}) {
+		t.Errorf("daemon builds %v", got)
 	}
 }
