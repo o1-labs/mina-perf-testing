@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	lib "itn_orchestrator"
 	"log"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +56,41 @@ type ExperimentState struct {
 	// explicit column map in updateExperimentInDB, so the DB column is
 	// unaffected by `json:"-"`.
 	WebhookURL string `gorm:"column:webhook_url" json:"-"`
+
+	// The run record: what the run was, who asked for it, and what it ran
+	// against, so that a run is reproducible and attributable from its own
+	// row. RequestedBy, DeploymentID, OrchestratorBuild and Script are set
+	// once at creation; Nodes and DaemonBuilds follow discovery.
+	RequestedBy       string         `gorm:"column:requested_by" json:"requested_by,omitempty"`
+	DeploymentID      *int           `gorm:"column:deployment_id" json:"deployment_id,omitempty"`
+	OrchestratorBuild string         `gorm:"column:orchestrator_build" json:"orchestrator_build,omitempty"`
+	Script            string         `gorm:"column:script" json:"-"`
+	Nodes             RunNodes       `gorm:"column:nodes_json;type:jsonb" json:"nodes,omitempty"`
+	DaemonBuilds      pq.StringArray `gorm:"column:daemon_builds;type:text[]" json:"daemon_builds,omitempty"`
+}
+
+// RunNodes is the resolved node set of a run, stored as JSON.
+type RunNodes []lib.RunNode
+
+func (n RunNodes) Value() (driver.Value, error) {
+	if n == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(n)
+	return string(b), err
+}
+
+func (n *RunNodes) Scan(src any) error {
+	switch v := src.(type) {
+	case nil:
+		*n = nil
+		return nil
+	case []byte:
+		return json.Unmarshal(v, n)
+	case string:
+		return json.Unmarshal([]byte(v), n)
+	}
+	return fmt.Errorf("RunNodes: cannot scan %T", src)
 }
 
 func (ExperimentState) TableName() string {
@@ -465,6 +503,8 @@ func (a *Store) updateExperimentInDB(state *ExperimentState) error {
 		"errors":            state.Errors,
 		"logs":              state.Logs,
 		"webhook_url":       state.WebhookURL,
+		"nodes_json":        state.Nodes,
+		"daemon_builds":     state.DaemonBuilds,
 	}).Error
 	if err != nil {
 		log.Printf("Error updating experiment in DB: %v", err)
@@ -659,6 +699,37 @@ func (s *Store) UpdateStatus(status ExperimentStatus) error {
 }
 
 // UpdateCurrentStep updates the single job's current step
+// UpdateNodes records the run's resolved node set and the daemon builds in
+// it. It is a no-op when the set is unchanged.
+func (s *Store) UpdateNodes(nodes []lib.RunNode) (changed bool) {
+	s.AtomicSet(func(experiment *ExperimentState) {
+		// Nothing resolved yet is not a change from nothing recorded.
+		if len(experiment.Nodes) == 0 && len(nodes) == 0 {
+			return
+		}
+		if reflect.DeepEqual([]lib.RunNode(experiment.Nodes), nodes) {
+			return
+		}
+		changed = true
+		experiment.Nodes = RunNodes(nodes)
+		experiment.DaemonBuilds = lib.DaemonBuilds(nodes)
+		experiment.UpdatedAt = time.Now()
+	})
+	return changed
+}
+
+// CurrentDeploymentID is the deployment the trace tables are being written
+// under (get_max_deployment_id() of load-tests-cluster/init-sql). It is nil
+// when the database has no deployment row or lacks the function.
+func (s *Store) CurrentDeploymentID(ctx context.Context) *int {
+	var id *int
+	if err := s.DB.WithContext(ctx).Raw(`SELECT get_max_deployment_id()`).Scan(&id).Error; err != nil {
+		log.Printf("No current deployment id for the run record: %v", err)
+		return nil
+	}
+	return id
+}
+
 func (s *Store) UpdateCurrentStep(name string, number int) error {
 	s.AtomicSet(func(experiment *ExperimentState) {
 		experiment.CurrentStepName = name

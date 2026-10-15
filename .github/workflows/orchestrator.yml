@@ -34,5 +34,5 @@ jobs:
         run: docker build -t orchestrator:latest .
         working-directory: ./orchestrator
       - name: Build service Docker image
-        run: docker build -f Dockerfile-service -t orchestrator-service:latest .
+        run: docker build -f Dockerfile-service --build-arg ORCHESTRATOR_BUILD=${{ github.sha }} -t orchestrator-service:latest .
         working-directory: ./orchestrator

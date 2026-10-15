@@ -26,7 +26,7 @@ type CreateExperimentHandler struct {
 // This function creates a new experiment based on the provided setup parameters,
 // validates the input, generates the experiment configuration, and starts the experiment execution.
 // Returns (statusCode, errors) where statusCode indicates the type of response.
-func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputData) (int, []string, *InfoExperimentResponse) {
+func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputData, requestedBy string) (int, []string, *InfoExperimentResponse) {
 	var p lib.GenParams
 	setup.ApplyWithDefaults(&p)
 
@@ -62,11 +62,15 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 	}
 
 	job := &service.ExperimentState{
-		Name:       *setup.ExperimentName,
-		Status:     "running",
-		CreatedAt:  time.Now(),
-		Setup:      p,
-		WebhookURL: webhookURL,
+		Name:              *setup.ExperimentName,
+		Status:            "running",
+		CreatedAt:         time.Now(),
+		Setup:             p,
+		WebhookURL:        webhookURL,
+		RequestedBy:       requestedBy,
+		DeploymentID:      h.Store.CurrentDeploymentID(context.Background()),
+		OrchestratorBuild: orchestratorBuild,
+		Script:            experimentScript,
 	}
 
 	// The cause tells an anomaly (watchRun) from an operator cancel.
@@ -82,6 +86,11 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 	config.ReportStep = func(name string, step int) {
 		h.Store.UpdateCurrentStep(name, step)
 		watcher.ObserveStep(name)
+		// The node set grows as discovery runs; the record follows it. This
+		// runs on the run's goroutine, which is the only writer of NodeData.
+		if nodes := config.ResolvedNodes(); h.Store.UpdateNodes(nodes) {
+			log.Infof("Resolved %d node(s); daemon builds: %s", len(nodes), describeBuilds(nodes))
+		}
 	}
 
 	// Add both claims the experiment slot and persists the experiment, and it
@@ -99,6 +108,8 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 		return http.StatusInternalServerError, []string{err.Error()}, nil
 	}
 
+	log.Infof("Run record: requested by %s, deployment %s, orchestrator build %s",
+		orDash(requestedBy), deploymentString(job.DeploymentID), orchestratorBuild)
 	log.Infof("%s", watcher.Describe())
 	if p.Anomaly.Checks {
 		go h.App.watchRun(ctx, cancelCause, watcher, anomalyCheckInterval)
@@ -145,7 +156,9 @@ func (h *CreateExperimentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	statusCode, errors, info := h.Handle(experimentSetup)
+	// The basic-auth user of the request (empty with -allow-unauthenticated-writes).
+	requestedBy, _, _ := r.BasicAuth()
+	statusCode, errors, info := h.Handle(experimentSetup, requestedBy)
 
 	// Determine result based on status code
 	var result string

@@ -299,6 +299,15 @@ When both are present the envelope wins. New callers should send the flat form.
 ### 2. Check Experiment Status
 Retrieves the current status of the running experiment.
 
+Besides the status, step, logs, warnings and errors, the response carries
+the run record: `requested_by` (the basic-auth user that posted the run),
+`deployment_id` (the deployment the trace tables are written under),
+`orchestrator_build` (the git commit the service was built from),
+`nodes` (the resolved node set: address, peer id, block producer, harness
+support and the daemon's build, following discovery) and `daemon_builds`
+(the distinct daemon builds in it). The generated script is stored with the
+run (`experiment_state.script`) but not served here.
+
 ```bash
 curl --location 'http://host:9090/api/v0/experiment/status'
 ```

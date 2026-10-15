@@ -19,7 +19,9 @@ ENV CONFIG=${CONFIG}
 WORKDIR /
 ENV GOFLAGS=-buildvcs=false
 COPY . .
-RUN make orchestrator_service
+# The git commit the image is built from, recorded in every run's record.
+ARG ORCHESTRATOR_BUILD=unknown
+RUN make orchestrator_service BUILD=${ORCHESTRATOR_BUILD}
 
 FROM ubuntu:jammy AS app
 ENV DEBIAN_FRONTEND=noninteractive
