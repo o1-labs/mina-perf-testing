@@ -69,15 +69,19 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 		WebhookURL: webhookURL,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// The cause tells an anomaly (watchRun) from an operator cancel.
+	ctx, cancelCause := context.WithCancelCause(context.Background())
+	cancel := func() { cancelCause(nil) }
 
 	orchestratorConfig := *h.Config
 	log := service.StoreLogging{Store: h.Store, Log: logging.Logger("orchestrator")}
 	config := lib.SetupConfig(ctx, orchestratorConfig, log)
 	// Report progress directly rather than having the store infer it from log
 	// format strings.
+	watcher := newRunWatcher(dbProbe{db: h.Store.DB}, &p, h.Config.SlotDurationMs)
 	config.ReportStep = func(name string, step int) {
 		h.Store.UpdateCurrentStep(name, step)
+		watcher.ObserveStep(name)
 	}
 
 	// Add both claims the experiment slot and persists the experiment, and it
@@ -95,6 +99,10 @@ func (h *CreateExperimentHandler) Handle(setup *service_inputs.GeneratorInputDat
 		return http.StatusInternalServerError, []string{err.Error()}, nil
 	}
 
+	log.Infof("%s", watcher.Describe())
+	if p.Anomaly.Checks {
+		go h.App.watchRun(ctx, cancelCause, watcher, anomalyCheckInterval)
+	}
 	decoder := json.NewDecoder(strings.NewReader(experimentScript))
 	go h.App.loadRun(decoder, config, log)
 

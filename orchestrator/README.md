@@ -247,6 +247,27 @@ The service refuses to start without a users file. For a private network
 only, `-allow-unauthenticated-writes` (or `ALLOW_UNAUTHENTICATED_WRITES=1`)
 serves the `POST` endpoints open, and the service logs a warning at startup.
 
+### Within-run anomaly checks
+
+While an experiment runs, the service checks the network once a minute
+through the trace database (the fetcher and the consumer put every node's
+block traces there) and fails the run at the first anomaly, with the error
+webhook, instead of running to the end and reporting success over a stalled
+chain. The checks need no history of earlier runs. Request fields, all
+optional:
+
+| Field | Default | Check |
+|:--|:--|:--|
+| `anomaly_checks` | `true` | `false` turns every check off |
+| `anomaly_chain_stall_slots` | `10` | no node reported a new block for this many slots (a dead trace pipeline looks the same and is reported the same) |
+| `anomaly_tx_stall_min` | `10` | while load is being sent, none of the run's transactions reached a block in this many minutes; also the window of the throughput check and the grace period after the load starts |
+| `anomaly_min_tps_ratio` | `0.2` | while load is being sent, the rate of the run's transactions that reached blocks over the last `anomaly_tx_stall_min` minutes is below this fraction of the offered rate (the lower of `base_tps` and `stress_tps`); `0` turns this check off |
+| `anomaly_max_restarts` | `0` | more node restarts than this were recorded (`node_restarts`) during the run; skipped when the run stops nodes itself (`stops_per_round` > 0) |
+
+The run's transactions are recognised by their memo, which starts with the
+experiment name. A failed check ends the run as `error` with the reason in
+`errors`, and the load left on the nodes is stopped as after any failed run.
+
 ### 1. Run Experiment
 Starts a new experiment with the provided setup.
 

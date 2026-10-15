@@ -51,7 +51,7 @@ func simpleRangeCheck(value float64, name string) ValidationStep {
 const MaxExperimentNameLen = 32 - len("-99-99")
 
 func ValidationSteps(p *GenParams) []ValidationStep {
-	return []ValidationStep{
+	steps := []ValidationStep{
 		{
 			ErrorMsg: fmt.Sprintf("experiment name must be at most %d characters, so that memos (\"<name>-<round>-<batch>\") fit in 32", MaxExperimentNameLen),
 			Check:    func(p *GenParams) bool { return len(p.ExperimentName) > MaxExperimentNameLen },
@@ -183,6 +183,7 @@ func ValidationSteps(p *GenParams) []ValidationStep {
 			ExitCode: 2,
 		},
 	}
+	return append(steps, anomalyValidationSteps(p)...)
 }
 
 func ValidateAndCollectErrors(p *GenParams) []string {

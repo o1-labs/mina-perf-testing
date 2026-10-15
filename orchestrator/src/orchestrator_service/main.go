@@ -385,6 +385,23 @@ func (a *App) loadRun(inDecoder *json.Decoder, config lib.Config, log logging.St
 		a.stopLeftoverLoad(config, log)
 	}
 
+	// A run cancelled by a within-run check failed: the anomaly is the
+	// error, with the error webhook, whatever the step returned.
+	if anomaly := anomalyCause(config.Ctx); anomaly != nil {
+		orchErr := &lib.OrchestratorError{Message: "Experiment failed: " + anomaly.Message, Code: 10}
+		stdoutLog.Printf("%s", orchErr.Message)
+		if experiment := a.Store.FinishWithError(orchErr); experiment != nil && experiment.WebhookURL != "" {
+			go a.WebhookNotifier.SendErrorNotification(
+				context.Background(),
+				experiment.WebhookURL,
+				experiment.Name,
+				orchErr.Message,
+				experiment.Warnings,
+			)
+		}
+		return
+	}
+
 	// A cancel is not always an error. RunActions returns *nil* when it sees
 	// ctx.Done between steps (orchestrator.go), so a cancel landing during a
 	// WaitAction -- a plain time.Sleep, and the last round now ends with one
