@@ -31,6 +31,8 @@ type GenParams struct {
 	PaymentAmount, MinZkappFee, MaxZkappFee, FundFee                     uint64
 	MinPaymentFee, MaxPaymentFee                                         uint64
 	ZkappSoftLimit                                                       int
+	// Anomaly holds the thresholds of the within-run checks (anomaly.go).
+	Anomaly AnomalyParams
 }
 
 func DefaultGenParams() GenParams {
@@ -78,6 +80,7 @@ func DefaultGenParams() GenParams {
 		MinPaymentFee:          1e8,
 		MaxPaymentFee:          2e8,
 		ZkappSoftLimit:         -2,
+		Anomaly:                DefaultAnomalyParams(),
 	}
 }
 

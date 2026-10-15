@@ -217,14 +217,16 @@ func TestCancelMidActionIsNotAnError(t *testing.T) {
 	if len(got.Errors) != 0 {
 		t.Errorf("errors = %q, want none -- a cancellation is not a failure", got.Errors)
 	}
+	// The cancel is recorded in Logs, as the raw "context canceled" from the
+	// action or as the orchestrator's own "Experiment canceled" line.
 	inLogs := false
 	for _, l := range got.Logs {
-		if strings.Contains(l, "context canceled") {
+		if strings.Contains(l, "context canceled") || strings.Contains(l, "Experiment canceled") {
 			inLogs = true
 		}
 	}
 	if !inLogs {
-		t.Errorf("the context-canceled message should still be in Logs; logs=%q", got.Logs)
+		t.Errorf("the cancel should be in Logs; logs=%q", got.Logs)
 	}
 	mu.Lock()
 	defer mu.Unlock()

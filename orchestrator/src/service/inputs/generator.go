@@ -52,7 +52,13 @@ type GeneratorInputData struct {
 	MinBalanceChange       *uint64                       `json:"min_balance_change,omitempty"`
 	PaymentAmount          *uint64                       `json:"payment_amount,omitempty"`
 	WebhookURL             *string                       `json:"webhook_url,omitempty"`
-	Privkeys               []string                      `json:"priv_keys,omitempty"`
+	// Within-run anomaly checks (lib.AnomalyParams).
+	AnomalyChecks          *bool    `json:"anomaly_checks,omitempty"`
+	AnomalyChainStallSlots *int     `json:"anomaly_chain_stall_slots,omitempty"`
+	AnomalyTxStallMin      *int     `json:"anomaly_tx_stall_min,omitempty"`
+	AnomalyMinTpsRatio     *float64 `json:"anomaly_min_tps_ratio,omitempty"`
+	AnomalyMaxRestarts     *int     `json:"anomaly_max_restarts,omitempty"`
+	Privkeys               []string `json:"priv_keys,omitempty"`
 	Fees                   struct {
 		Deployment *uint64 `json:"deployment,omitempty"`
 		Fund       *uint64 `json:"fund,omitempty"`
@@ -120,6 +126,11 @@ func (inputData *GeneratorInputData) ApplyWithDefaults(p *lib.GenParams) {
 	lib.SetOrDefault(inputData.PauseMin, &p.PauseMin, defaults.PauseMin)
 	lib.SetOrDefault(inputData.Rounds, &p.Rounds, defaults.Rounds)
 	lib.SetOrDefault(inputData.StopsPerRound, &p.StopsPerRound, defaults.StopsPerRound)
+	lib.SetOrDefault(inputData.AnomalyChecks, &p.Anomaly.Checks, defaults.Anomaly.Checks)
+	lib.SetOrDefault(inputData.AnomalyChainStallSlots, &p.Anomaly.ChainStallSlots, defaults.Anomaly.ChainStallSlots)
+	lib.SetOrDefault(inputData.AnomalyTxStallMin, &p.Anomaly.TxStallMin, defaults.Anomaly.TxStallMin)
+	lib.SetOrDefault(inputData.AnomalyMinTpsRatio, &p.Anomaly.MinTpsRatio, defaults.Anomaly.MinTpsRatio)
+	lib.SetOrDefault(inputData.AnomalyMaxRestarts, &p.Anomaly.MaxRestarts, defaults.Anomaly.MaxRestarts)
 	lib.SetOrDefault(inputData.Gap, &p.Gap, defaults.Gap)
 	lib.SetOrDefault(inputData.ZkappSoftLimit, &p.ZkappSoftLimit, defaults.ZkappSoftLimit)
 	lib.SetOrDefault(inputData.FundKeyPrefix, &p.FundKeyPrefix, defaults.FundKeyPrefix)
