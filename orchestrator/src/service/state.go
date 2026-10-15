@@ -703,6 +703,10 @@ func (s *Store) UpdateStatus(status ExperimentStatus) error {
 // it. It is a no-op when the set is unchanged.
 func (s *Store) UpdateNodes(nodes []lib.RunNode) (changed bool) {
 	s.AtomicSet(func(experiment *ExperimentState) {
+		// Nothing resolved yet is not a change from nothing recorded.
+		if len(experiment.Nodes) == 0 && len(nodes) == 0 {
+			return
+		}
 		if reflect.DeepEqual([]lib.RunNode(experiment.Nodes), nodes) {
 			return
 		}

@@ -491,6 +491,9 @@ func TestRunRecordIsPersisted(t *testing.T) {
 		{Address: "10.0.0.1:3086", PeerID: "p1", HarnessSupport: true, Build: "bbb"},
 		{Address: "10.0.0.2:3086", PeerID: "p2", BlockProducer: true, HarnessSupport: true, Build: "aaa"},
 	}
+	if s.UpdateNodes(nil) || s.UpdateNodes([]lib.RunNode{}) {
+		t.Fatal("an empty node set counted as a change")
+	}
 	if !s.UpdateNodes(nodes) {
 		t.Fatal("the first node set did not count as a change")
 	}
