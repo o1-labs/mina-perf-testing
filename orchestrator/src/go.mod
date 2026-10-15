@@ -3,7 +3,7 @@ module itn_orchestrator
 go 1.23
 
 require (
-	github.com/MinaProtocol/mina-sdk-go v0.4.0-rc.1
+	github.com/MinaProtocol/mina-sdk-go v0.4.0-rc.2
 	github.com/aws/aws-sdk-go-v2 v1.21.1
 	github.com/aws/aws-sdk-go-v2/config v1.18.44
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.40.1
